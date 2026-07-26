@@ -13,7 +13,8 @@ Every named star with a measured parallax, plotted where it belongs on the HR di
 ## Features
 
 - **461 named stars** from the HYG catalog, plotted in log Teff against log luminosity
-- **Spatial navigation**: the arrow keys move to the nearest star in that direction on the diagram, so you can walk up the main sequence and across into the giants
+- **Walk the diagram**: the arrow keys move cell by cell, so you can climb the main sequence and cross into the giants. `Tab` cycles the stars sharing a cell, `Enter` opens them as a pick list you walk with ↓↑ and choose from
+- **The whole catalog as a list** (`L`), ordered by whatever the color mode is asking: hottest, nearest, brightest, heaviest, largest. `e` writes the same ordering to `~/stars-by-<mode>.csv`, every column included
 - **Seven color modes** (keys 1-7, `m` for the menu, or Ctrl+←/→): spectral class in true star colors, luminosity class, distance, apparent magnitude, mass, radius, and data source
 - **Evolutionary tracks** (`t`): schematic paths for 1, 5 and 15 M☉, with their stages named below the diagram, from ZAMS through the giant branch to a white dwarf or a supernova
 - **Honest about its numbers**: measured values come from Wikidata, the rest are derived from the spectral type and absolute magnitude, and mode 7 colors the diagram by which is which
@@ -43,9 +44,12 @@ First start builds the catalog (about three minutes), then the app works offline
 
 | Key | Action |
 |-----|--------|
-| ← ↑ ↓ →, h/j/k/l | Move to the nearest star that way on the diagram |
-| Tab, Shift+Tab | Next / previous star by apparent brightness |
-| < >, n p | Same as Tab / Shift+Tab |
+| ← ↑ ↓ →, h/j/k/l | Move one cell that way on the diagram |
+| Tab, Shift+Tab | Next / previous star within the current cell |
+| Enter | List every star in the cell; ↓↑ walks it, Enter picks |
+| L | List the whole catalog, ordered by the current color mode |
+| e | Export that ordered list to `~/stars-by-<mode>.csv` |
+| < >, n p | Previous / next star in the catalog |
 | 1-7, Ctrl+←/→ | Color mode |
 | m | Mode menu |
 | t | Evolutionary tracks: off → 1 M☉ → 5 M☉ → 15 M☉ → all |

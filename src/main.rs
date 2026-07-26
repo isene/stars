@@ -237,57 +237,44 @@ fn main() {
                 if !list.is_empty() {
                     let (col, row) = app.cur_cell();
                     let (teff, lum) = cell_range(col, row);
-                    // Rows are colored and captioned by the ACTIVE color
-                    // mode, so the list answers the question the diagram
-                    // is currently being asked.
-                    let lines: Vec<String> = list
-                        .iter()
-                        .map(|&i| {
-                            let s = &app.stars[i];
-                            let name: String = s.name.chars().take(20).collect();
-                            format!(
-                                " {} {:<10} {:>7.0} K  {:>9} L☉  {}",
-                                style::rgb(
-                                    &format!("{name:<20}"),
-                                    Some(star_rgb(&app, s)),
-                                    None,
-                                    ""
-                                ),
-                                s.spectral,
-                                s.teff,
-                                fmt_num(s.lum),
-                                style::rgb(
-                                    &format!("{:<22}", mode_value_str(&app, s)),
-                                    Some(star_rgb(&app, s)),
-                                    None,
-                                    "b"
-                                )
-                            )
-                        })
-                        .collect();
-                    let w = 96.min(cols.saturating_sub(4));
-                    let h = (lines.len() as u16 + 2).min(rows.saturating_sub(6)).max(3);
-                    let mut pop = Popup::centered(w, h, 253, 236);
-                    // Say what the cell is and what the last column means.
-                    status.say(&style::dim(&format!(
-                        " {} stars near {:.0} K / {} L☉ · last column: {} · ENTER picks",
+                    let hint = format!(
+                        " {} stars near {:.0} K / {} L☉ · last column: {} · ↓↑ walk · ENTER picks",
                         list.len(),
                         teff,
                         fmt_num(lum),
                         MODE_NAMES[app.mode]
-                    )));
-                    let picked = pop.modal(&lines.join("\n"));
-                    pop.dismiss(&mut [&mut detail, &mut status]);
-                    Crust::clear_screen();
-                    if let Some(ix) = picked {
-                        if let Some(&i) = list.get(ix) {
-                            app.sel = i;
-                            app.cell_ix = ix;
-                            app.chat.clear();
-                        }
-                    }
-                    let _ = (teff, lum);
-                    draw_all(&app, &mut detail, &mut status, cols, rows);
+                    );
+                    let at = app.cell_ix;
+                    pick_list(&mut app, &list, at, &hint, &mut detail, &mut status, cols, rows);
+                }
+            }
+            // The whole catalog, ordered by whatever the color mode is
+            // asking: brightest, nearest, heaviest, hottest.
+            "L" => {
+                let list = mode_order(&app);
+                let start = list.iter().position(|&i| i == app.sel).unwrap_or(0);
+                let hint = format!(
+                    " all {} stars by {} · ↓↑ walk · ENTER picks",
+                    list.len(),
+                    MODE_NAMES[app.mode]
+                );
+                pick_list(&mut app, &list, start, &hint, &mut detail, &mut status, cols, rows);
+            }
+            // The same list, on disk.
+            "e" => {
+                let list = mode_order(&app);
+                match export_csv(&app, &list) {
+                    Ok(p) => status.say(&style::dim(&format!(
+                        " {} stars by {} → {p}",
+                        list.len(),
+                        MODE_NAMES[app.mode]
+                    ))),
+                    Err(e) => status.say(&style::rgb(
+                        &format!(" export failed: {e}"),
+                        Some(ERR_RGB),
+                        None,
+                        "",
+                    )),
                 }
             }
             "1" | "2" | "3" | "4" | "5" | "6" | "7" => {
@@ -520,6 +507,156 @@ fn cycle_cell(app: &mut App, forward: bool, detail: &mut Pane, cols: u16) {
     select(app, list[next], detail, cols);
 }
 
+/// A popup of stars to walk and pick from, colored and captioned by the
+/// ACTIVE color mode, so the list answers the question the diagram is
+/// currently being asked. `start` is the row to open on.
+#[allow(clippy::too_many_arguments)]
+fn pick_list(
+    app: &mut App,
+    list: &[usize],
+    start: usize,
+    hint: &str,
+    detail: &mut Pane,
+    status: &mut Pane,
+    cols: u16,
+    rows: u16,
+) {
+    if list.is_empty() {
+        return;
+    }
+    let lines: Vec<String> = list
+        .iter()
+        .map(|&i| {
+            let s = &app.stars[i];
+            let name: String = s.name.chars().take(20).collect();
+            format!(
+                " {} {:<10} {:>7.0} K  {:>9} L☉  {}",
+                style::rgb(&format!("{name:<20}"), Some(star_rgb(app, s)), None, ""),
+                s.spectral,
+                s.teff,
+                fmt_num(s.lum),
+                style::rgb(
+                    &format!("{:<22}", mode_value_str(app, s)),
+                    Some(star_rgb(app, s)),
+                    None,
+                    "b"
+                )
+            )
+        })
+        .collect();
+    let w = 96.min(cols.saturating_sub(4));
+    let h = (lines.len() as u16).min(rows.saturating_sub(6)).max(1);
+    let mut pop = Popup::centered(w, h, 253, 236);
+    // Open on the star we are already showing, so the list is a place to
+    // walk from rather than a fresh start.
+    pop.pane.index = start.min(list.len() - 1);
+    status.say(&style::dim(hint));
+    let picked = pop.modal(&lines.join("\n"));
+    pop.dismiss(&mut [detail, status]);
+    Crust::clear_screen();
+    if let Some(ix) = picked {
+        if let Some(&i) = list.get(ix) {
+            if i != app.sel {
+                app.chat.clear();
+            }
+            app.sel = i;
+            app.view = View::Article;
+            app.cell_ix = app
+                .cur_cell_stars()
+                .iter()
+                .position(|&j| j == app.sel)
+                .unwrap_or(0);
+        }
+    }
+    draw_all(app, detail, status, cols, rows);
+}
+
+/// One CSV field, quoted only when it has to be.
+fn csv(v: &str) -> String {
+    if v.contains([',', '"', '\n']) {
+        format!("\"{}\"", v.replace('"', "\"\""))
+    } else {
+        v.to_string()
+    }
+}
+
+fn num(v: f64) -> String {
+    if v.is_finite() {
+        format!("{v:.4}")
+    } else {
+        String::new()
+    }
+}
+
+/// Write the given stars to CSV, in the order they are listed, with every
+/// column the app knows — including which numbers were measured and which
+/// this program derived.
+fn export_csv(app: &App, list: &[usize]) -> Result<String, String> {
+    let slug = MODE_NAMES[app.mode].replace(' ', "-");
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let path = std::path::Path::new(&home).join(format!("stars-by-{slug}.csv"));
+    let mut out = String::with_capacity(list.len() * 160);
+    out.push_str(
+        "name,designation,constellation,spectral,lum_class,teff_k,teff_source,\
+         luminosity_lsun,lum_source,radius_rsun,mass_msun,distance_ly,\
+         apparent_mag,absolute_mag,color_index,hip,hd,url\n",
+    );
+    for &i in list {
+        let s = &app.stars[i];
+        out.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            csv(&s.name),
+            csv(&s.designation),
+            csv(&s.constellation),
+            csv(&s.spectral),
+            csv(&s.lum_class),
+            num(s.teff),
+            csv(s.teff_src.label()),
+            num(s.lum),
+            csv(s.lum_src.label()),
+            s.radius.map(num).unwrap_or_default(),
+            s.mass.map(num).unwrap_or_default(),
+            num(s.dist_ly()),
+            num(s.mag),
+            num(s.absmag),
+            s.color_index.map(num).unwrap_or_default(),
+            csv(&s.hip),
+            csv(&s.hd),
+            csv(&s.source),
+        ));
+    }
+    std::fs::write(&path, out).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+/// The whole catalog in the order the current color mode implies:
+/// hottest, most luminous, nearest, brightest, heaviest, largest.
+fn mode_order(app: &App) -> Vec<usize> {
+    let mut ix: Vec<usize> = (0..app.stars.len()).collect();
+    let key = |s: &Star| -> (i64, i64) {
+        let big = |v: f64| -(v * 1000.0) as i64; // descending
+        match app.mode {
+            1 => (
+                data::lum_class_group(&s.lum_class) as i64,
+                big(s.lum.max(0.0).log10().max(-9.0) + 10.0),
+            ),
+            2 => ((s.dist_ly() * 1000.0) as i64, 0),
+            3 => ((s.mag * 1000.0) as i64, 0),
+            4 => (s.mass.map_or(i64::MAX, |m| big(m)), 0),
+            5 => (s.radius.map_or(i64::MAX, |r| big(r)), 0),
+            6 => (s.teff_src as i64, 0),
+            // Spectral class: hottest first, which walks O through M.
+            _ => (big(s.teff), 0),
+        }
+    };
+    ix.sort_by(|&a, &b| {
+        key(&app.stars[a])
+            .cmp(&key(&app.stars[b]))
+            .then_with(|| app.stars[a].name.cmp(&app.stars[b].name))
+    });
+    ix
+}
+
 fn select(app: &mut App, new: usize, detail: &mut Pane, cols: u16) {
     if new == app.sel && app.view == View::Article {
         return;
@@ -529,6 +666,12 @@ fn select(app: &mut App, new: usize, detail: &mut Pane, cols: u16) {
     }
     app.sel = new;
     app.view = View::Article;
+    // Keep Tab's in-cell cursor on the star we just jumped to.
+    app.cell_ix = app
+        .cur_cell_stars()
+        .iter()
+        .position(|&i| i == app.sel)
+        .unwrap_or(0);
     draw_header(app, cols);
     redraw_diagram(app, cols);
     draw_side(app, cols);
@@ -903,7 +1046,7 @@ fn draw_axes(cols: u16) {
 }
 
 fn help_line() -> String {
-    style::dim("←↓↑→ cell · Tab in-cell · ⏎ list · 1-7/m color · t tracks · / find · c claude · ? help · q")
+    style::dim("←↓↑→ cell · Tab in-cell · ⏎ cell list · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q")
 }
 
 fn draw_all(app: &App, detail: &mut Pane, status: &mut Pane, cols: u16, _rows: u16) {
@@ -1169,6 +1312,7 @@ fn help_text() -> String {
          \x20 ← ↑ ↓ → / h j k l   walk the diagram a cell at a time\n\
          \x20 Tab / Shift-Tab     cycle the stars sharing the cursor's cell\n\
          \x20 ENTER               list every star in the cell and pick one\n\
+         \x20 L                   list the WHOLE catalog, ordered by the color mode\n\
          \x20 < > or n p          previous / next star by apparent brightness\n\
          \x20 1-7, Ctrl+← →       color mode: 1 spectral class · 2 luminosity class ·\n\
          \x20                     3 distance · 4 apparent magnitude · 5 mass ·\n\
@@ -1182,6 +1326,7 @@ fn help_text() -> String {
          \x20 c                   ask Claude about this star (follow-ups keep context)\n\
          \x20 C                   toggle the Claude conversation view\n\
          \x20 w                   open the star's Wikipedia page in the browser\n\
+         \x20 e                   export that same ordered list to ~/stars-by-<mode>.csv\n\
          \x20 u                   rebuild the catalog\n\
          \x20 ?                   toggle this help\n\
          \x20 ESC                 back to the article (quits from the article view)\n\
