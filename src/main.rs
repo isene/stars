@@ -237,23 +237,45 @@ fn main() {
                 if !list.is_empty() {
                     let (col, row) = app.cur_cell();
                     let (teff, lum) = cell_range(col, row);
+                    // Rows are colored and captioned by the ACTIVE color
+                    // mode, so the list answers the question the diagram
+                    // is currently being asked.
                     let lines: Vec<String> = list
                         .iter()
                         .map(|&i| {
                             let s = &app.stars[i];
+                            let name: String = s.name.chars().take(20).collect();
                             format!(
-                                " {} {:<10} {:>7.0} K  {:>10} L☉  mag {:>5.2}",
-                                style::rgb(&format!("{:<20}", s.name.chars().take(20).collect::<String>()), Some(class_rgb(s.class())), None, ""),
+                                " {} {:<10} {:>7.0} K  {:>9} L☉  {}",
+                                style::rgb(
+                                    &format!("{name:<20}"),
+                                    Some(star_rgb(&app, s)),
+                                    None,
+                                    ""
+                                ),
                                 s.spectral,
                                 s.teff,
                                 fmt_num(s.lum),
-                                s.mag
+                                style::rgb(
+                                    &format!("{:<22}", mode_value_str(&app, s)),
+                                    Some(star_rgb(&app, s)),
+                                    None,
+                                    "b"
+                                )
                             )
                         })
                         .collect();
-                    let w = 72.min(cols.saturating_sub(4));
+                    let w = 96.min(cols.saturating_sub(4));
                     let h = (lines.len() as u16 + 2).min(rows.saturating_sub(6)).max(3);
                     let mut pop = Popup::centered(w, h, 253, 236);
+                    // Say what the cell is and what the last column means.
+                    status.say(&style::dim(&format!(
+                        " {} stars near {:.0} K / {} L☉ · last column: {} · ENTER picks",
+                        list.len(),
+                        teff,
+                        fmt_num(lum),
+                        MODE_NAMES[app.mode]
+                    )));
                     let picked = pop.modal(&lines.join("\n"));
                     pop.dismiss(&mut [&mut detail, &mut status]);
                     Crust::clear_screen();
@@ -596,6 +618,33 @@ fn gradient(t: f64) -> (u8, u8, u8) {
         lerp((70, 130, 255), (250, 220, 90), t * 2.0)
     } else {
         lerp((250, 220, 90), (255, 80, 60), t * 2.0 - 1.0)
+    }
+}
+
+/// What the active color mode encodes for this star, as text. Used in
+/// the cell popup so the list reads in the same terms as the diagram.
+fn mode_value_str(app: &App, s: &Star) -> String {
+    match app.mode {
+        1 => {
+            let g = data::lum_class_group(&s.lum_class);
+            if s.lum_class.is_empty() {
+                "class unknown".to_string()
+            } else {
+                format!("{} {}", s.lum_class, LUMCLASS_LEGEND[g].0)
+            }
+        }
+        2 => format!("{:.1} ly", s.dist_ly()),
+        3 => format!("mag {:.2}", s.mag),
+        4 => match s.mass {
+            Some(m) => format!("{} M☉", fmt_num(m)),
+            None => "mass unknown".to_string(),
+        },
+        5 => match s.radius {
+            Some(r) => format!("{} R☉", fmt_num(r)),
+            None => "radius unknown".to_string(),
+        },
+        6 => format!("T {}", s.teff_src.label()),
+        _ => format!("class {}", s.class()),
     }
 }
 
