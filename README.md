@@ -18,7 +18,7 @@ Every named star with a measured parallax, plotted where it belongs on the HR di
 - **Seven color modes** (keys 1-7, `m` for the menu, or Ctrl+←/→): spectral class in true star colors, luminosity class, distance, apparent magnitude, mass, radius, and data source
 - **Evolutionary tracks** (`t`): schematic paths for 1, 5 and 15 M☉, with their stages named below the diagram, from ZAMS through the giant branch to a white dwarf or a supernova
 - **Honest about its numbers**: measured values come from Wikidata, the rest are derived from the spectral type and absolute magnitude, and mode 7 colors the diagram by which is which
-- **Full Wikipedia article** for 439 of the stars, cached locally
+- **The right Wikipedia article**: a star's IAU name is often a word first (Tupi is a people, Anser a genus of geese, Pollux a demigod), so each candidate page is checked before it is kept, falling through to `<name> (star)` and the HD / HIP designations. Cached locally for 445 of the 461
 - **Ask Claude** (`c`) about the star you are looking at, with its data and article as context
 - **Zero idle cost**: event-driven, no timers, no polling
 - **Offline**: one fetch, then everything is local

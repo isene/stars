@@ -203,11 +203,11 @@ pub fn fetch_all() -> Result<Vec<Star>, String> {
                 if i >= total {
                     break;
                 }
-                let name = {
+                let (name, hd, hip) = {
                     let s = stars.lock().unwrap();
-                    s[i].name.clone()
+                    (s[i].name.clone(), s[i].hd.clone(), s[i].hip.clone())
                 };
-                let fetched = fetch_article(&agent, &name);
+                let fetched = fetch_article(&agent, &name, &hd, &hip);
                 {
                     let mut s = stars.lock().unwrap();
                     match fetched {
@@ -233,12 +233,36 @@ pub fn fetch_all() -> Result<Vec<Star>, String> {
     for w in workers {
         let _ = w.join();
     }
-    let missed = *failed.lock().unwrap();
-    println!("\r  {} articles fetched, {missed} without one{:20}", total - missed, "");
-    let stars = Arc::try_unwrap(stars)
+    let mut stars = Arc::try_unwrap(stars)
         .map_err(|_| "worker thread leaked")?
         .into_inner()
         .unwrap();
+    drop(failed);
+
+    // Second pass, alone and unhurried. Most of what the parallel sweep
+    // misses is Wikipedia throttling three workers at once, not an
+    // article that does not exist.
+    let empty: Vec<usize> = (0..stars.len()).filter(|&i| stars[i].article.is_empty()).collect();
+    if !empty.is_empty() {
+        println!("\r  retrying {} that came back empty …{:20}", empty.len(), "");
+        let agent = agent();
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        for i in empty {
+            let (name, hd, hip) = (
+                stars[i].name.clone(),
+                stars[i].hd.clone(),
+                stars[i].hip.clone(),
+            );
+            if let Ok((title, text)) = fetch_article(&agent, &name, &hd, &hip) {
+                stars[i].source =
+                    format!("https://en.wikipedia.org/wiki/{}", title.replace(' ', "_"));
+                stars[i].article = text;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+    }
+    let missed = stars.iter().filter(|s| s.article.is_empty()).count();
+    println!("\r  {} articles fetched, {missed} without one{:20}", stars.len() - missed, "");
     Ok(stars)
 }
 
@@ -301,10 +325,62 @@ fn fetch_wikidata(stars: &[Star]) -> Result<HashMap<String, Measured>, String> {
     Ok(out)
 }
 
-/// Full plain-text article via the Wikipedia TextExtracts API.
-fn fetch_article(agent: &ureq::Agent, name: &str) -> Result<(String, String), String> {
+/// Words that place an article in the sky. A star's opening sentence
+/// always has one of them; "Tupi may refer to …" and "Anser is a genus
+/// of geese" do not.
+const SKY_WORDS: [&str; 9] = [
+    "star", "constellation", "magnitude", "stellar", "dwarf", "giant", "binary", "nebula",
+    "supernova",
+];
+
+/// The article for one star, trying the names it might be filed under.
+///
+/// A star's IAU name is very often a word first: Tupi is a people, Anser
+/// a genus of geese, Pollux a demigod, Hadar a place. Asking Wikipedia
+/// for the bare name lands on a disambiguation page or the wrong topic
+/// entirely, which is how 70 of 439 stars ended up with an article about
+/// something else. So each candidate is checked before it is accepted,
+/// and rejection falls through to the next name.
+fn fetch_article(
+    agent: &ureq::Agent,
+    name: &str,
+    hd: &str,
+    hip: &str,
+) -> Result<(String, String), String> {
+    let mut tried = Vec::new();
+    // Bare name first: it is right for most stars and costs one request.
+    tried.push(name.to_string());
+    // Wikipedia keeps a "<IAU name> (star)" redirect for the rest.
+    tried.push(format!("{name} (star)"));
+    // Catalog designations are unambiguous, when the star has one.
+    if !hd.is_empty() {
+        tried.push(format!("HD {hd}"));
+    }
+    if !hip.is_empty() {
+        tried.push(format!("HIP {hip}"));
+    }
+    // "Alula Australis B" is the secondary of a pair; Wikipedia covers
+    // the system under the primary's name.
+    if let Some((primary, comp)) = name.rsplit_once(' ') {
+        if matches!(comp, "A" | "B" | "C") {
+            tried.push(primary.to_string());
+            tried.push(format!("{primary} (star)"));
+        }
+    }
+    let mut last = String::from("no candidate matched");
+    for title in tried {
+        match fetch_one(agent, &title) {
+            Ok(hit) => return Ok(hit),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+/// One candidate title: fetched, then checked that it really is a star.
+fn fetch_one(agent: &ureq::Agent, name: &str) -> Result<(String, String), String> {
     let url = format!(
-        "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&formatversion=2&titles={}",
+        "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageprops&ppprop=disambiguation&explaintext=1&redirects=1&format=json&formatversion=2&titles={}",
         urlencode(name)
     );
     let mut last = String::new();
@@ -322,6 +398,15 @@ fn fetch_article(agent: &ureq::Agent, name: &str) -> Result<(String, String), St
                     let text = page["extract"].as_str().unwrap_or("").trim().to_string();
                     if text.is_empty() {
                         return Err("empty extract".into());
+                    }
+                    // A disambiguation page mentions stars without being
+                    // about one ("Castor most commonly refers to: …").
+                    if !page["pageprops"]["disambiguation"].is_null() {
+                        return Err(format!("{title} is a disambiguation page"));
+                    }
+                    let head: String = text.chars().take(400).collect::<String>().to_lowercase();
+                    if !SKY_WORDS.iter().any(|w| head.contains(w)) {
+                        return Err(format!("{title} is not about a star"));
                     }
                     return Ok((title, text));
                 }
