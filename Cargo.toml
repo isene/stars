@@ -1,6 +1,6 @@
 [package]
 name = "stars"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Geir Isene <g@isene.com>"]
 description = "Hertzsprung-Russell diagram explorer: prominent stars, their properties and evolutionary tracks, in the terminal. Part of the Fe2O3 suite, built on crust."

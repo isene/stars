@@ -983,13 +983,19 @@ fn sky_rows(s: &Star) -> Vec<(String, String)> {
 
 const LBL_W: usize = 13;
 
-/// One label/value row of a boxed table: dim label, plain value.
+/// One label/value row of a boxed table: dim label, gutter, plain value.
+/// The gutter is explicit because the longest labels ("apparent mag",
+/// "constellation") fill the label column exactly and would otherwise
+/// run straight into their value.
+const GUTTER: usize = 2;
+
 fn table_cell(entry: Option<&(String, String)>, cell: usize) -> String {
     match entry {
         Some((l, v)) => format!(
-            " {}{} ",
+            " {}{}{} ",
             style::dim(&format!("{l:<LBL_W$}")),
-            fit(v, cell.saturating_sub(LBL_W + 2))
+            " ".repeat(GUTTER),
+            fit(v, cell.saturating_sub(LBL_W + GUTTER + 2))
         ),
         None => " ".repeat(cell),
     }
