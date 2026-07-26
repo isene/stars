@@ -14,14 +14,16 @@ mod data;
 mod fetch;
 mod tracks;
 
-use crust::{Crust, Input, Pane};
+use crust::style;
+use crust::{Crust, Cursor, Input, Pane, Popup};
 use data::{Src, Star};
+use std::collections::HashMap;
 use std::io::Write;
 
 // Diagram geometry. The plot area is a fixed box; the article pane and
 // the property block flow around it.
 const PLOT_X: u16 = 8; // first column of the plot area
-const PLOT_Y: u16 = 3; // first row of the plot area
+const PLOT_Y: u16 = 4; // first row of the plot area (row 2 stays blank)
 const PLOT_W: u16 = 62;
 const PLOT_H: u16 = 17;
 const SIDE_X: u16 = PLOT_X + PLOT_W + 4; // property block column
@@ -35,8 +37,11 @@ const LOG_T_COOL: f64 = 3.301; // log10(2000)
 const LOG_L_MIN: f64 = -5.0;
 const LOG_L_MAX: f64 = 6.2;
 
-const RUST: &str = "\x1b[1;38;2;247;76;0m";
-const RESET: &str = "\x1b[0m";
+const RUST_RGB: (u8, u8, u8) = (247, 76, 0);
+const HEAD_RGB: (u8, u8, u8) = (247, 140, 60);
+const RESET: &str = style::RESET;
+const ERR_RGB: (u8, u8, u8) = (255, 120, 120);
+const ASK_RGB: (u8, u8, u8) = (120, 200, 255);
 
 const MODE_NAMES: [&str; 7] = [
     "spectral class",
@@ -59,12 +64,36 @@ enum View {
 struct App {
     stars: Vec<Star>,
     sel: usize,
+    /// Which star of the current cell is selected (Tab cycles).
+    cell_ix: usize,
+    /// Plot cell → the stars that land in it, brightest first.
+    cells: HashMap<(u16, u16), Vec<usize>>,
     mode: usize,
     /// 0 = off, else index into tracks::TRACKS + 1, last = all.
     track: usize,
     view: View,
     menu_ix: usize,
     chat: Vec<(String, String)>,
+}
+
+impl App {
+    /// The cell the selected star sits in.
+    fn cur_cell(&self) -> (u16, u16) {
+        cell_index(&self.stars[self.sel])
+    }
+    /// Every star in the current cell, brightest first.
+    fn cur_cell_stars(&self) -> &[usize] {
+        static EMPTY: &[usize] = &[];
+        self.cells.get(&self.cur_cell()).map(|v| v.as_slice()).unwrap_or(EMPTY)
+    }
+    fn build_cells(&mut self) {
+        self.cells.clear();
+        for (i, s) in self.stars.iter().enumerate() {
+            self.cells.entry(cell_index(s)).or_default().push(i);
+        }
+        // Stars arrive sorted by apparent magnitude, so each cell's list
+        // is already brightest-first.
+    }
 }
 
 fn main() {
@@ -139,12 +168,16 @@ fn main() {
     let mut app = App {
         stars,
         sel,
+        cell_ix: 0,
+        cells: HashMap::new(),
         mode: 0,
         track: 0,
         view: View::Article,
         menu_ix: 0,
         chat: Vec::new(),
     };
+    app.build_cells();
+    app.cell_ix = app.cur_cell_stars().iter().position(|&i| i == app.sel).unwrap_or(0);
 
     Crust::init();
     Crust::set_app_identity("Stars");
@@ -186,27 +219,70 @@ fn main() {
             "RIGHT" | "l" => step(&mut app, (1, 0), &mut detail, cols),
             "UP" | "k" => step(&mut app, (0, 1), &mut detail, cols),
             "DOWN" | "j" => step(&mut app, (0, -1), &mut detail, cols),
+            // Tab walks the stars sharing the cursor's cell.
+            "TAB" => cycle_cell(&mut app, true, &mut detail, cols),
+            "S-TAB" => cycle_cell(&mut app, false, &mut detail, cols),
             // Brightness tour: the sky's most prominent stars in order.
-            "TAB" | ">" | "n" => {
+            ">" | "n" => {
                 let t = (app.sel + 1).min(app.stars.len() - 1);
                 select(&mut app, t, &mut detail, cols);
             }
-            "S-TAB" | "<" | "p" => {
+            "<" | "p" => {
                 let t = app.sel.saturating_sub(1);
                 select(&mut app, t, &mut detail, cols);
+            }
+            // Everything in this cell, as a pick list.
+            "ENTER" => {
+                let list = app.cur_cell_stars().to_vec();
+                if !list.is_empty() {
+                    let (col, row) = app.cur_cell();
+                    let (teff, lum) = cell_range(col, row);
+                    let lines: Vec<String> = list
+                        .iter()
+                        .map(|&i| {
+                            let s = &app.stars[i];
+                            format!(
+                                " {} {:<10} {:>7.0} K  {:>10} L☉  mag {:>5.2}",
+                                style::rgb(&format!("{:<20}", s.name.chars().take(20).collect::<String>()), Some(class_rgb(s.class())), None, ""),
+                                s.spectral,
+                                s.teff,
+                                fmt_num(s.lum),
+                                s.mag
+                            )
+                        })
+                        .collect();
+                    let w = 72.min(cols.saturating_sub(4));
+                    let h = (lines.len() as u16 + 2).min(rows.saturating_sub(6)).max(3);
+                    let mut pop = Popup::centered(w, h, 253, 236);
+                    let picked = pop.modal(&lines.join("\n"));
+                    pop.dismiss(&mut [&mut detail, &mut status]);
+                    Crust::clear_screen();
+                    if let Some(ix) = picked {
+                        if let Some(&i) = list.get(ix) {
+                            app.sel = i;
+                            app.cell_ix = ix;
+                            app.chat.clear();
+                        }
+                    }
+                    let _ = (teff, lum);
+                    draw_all(&app, &mut detail, &mut status, cols, rows);
+                }
             }
             "1" | "2" | "3" | "4" | "5" | "6" | "7" => {
                 app.mode = key.parse::<usize>().unwrap() - 1;
                 app.view = View::Article;
+                draw_header(&app, cols);
                 redraw_diagram(&app, cols);
                 set_detail(&app, &mut detail, cols);
             }
             "C-RIGHT" => {
                 app.mode = (app.mode + 1) % MODE_NAMES.len();
+                draw_header(&app, cols);
                 redraw_diagram(&app, cols);
             }
             "C-LEFT" => {
                 app.mode = (app.mode + MODE_NAMES.len() - 1) % MODE_NAMES.len();
+                draw_header(&app, cols);
                 redraw_diagram(&app, cols);
             }
             "m" => {
@@ -230,14 +306,14 @@ fn main() {
             "G" | "END" => detail.bottom(),
             "/" => {
                 let q = status.ask_or_cancel("Find star: ", "");
-                print!("\x1b[?25l");
+                print!("{}", Cursor::hide_seq());
                 std::io::stdout().flush().ok();
                 match q.as_deref().map(|q| find(&app.stars, q)) {
                     Some(Some(i)) => {
                         select(&mut app, i, &mut detail, cols);
                         status.say(&help_line());
                     }
-                    Some(None) => status.say("\x1b[38;2;255;120;120mno match\x1b[0m"),
+                    Some(None) => status.say(&style::rgb("no match", Some(ERR_RGB), None, "")),
                     None => status.say(&help_line()),
                 }
             }
@@ -258,11 +334,11 @@ fn main() {
                     "Follow-up: ".to_string()
                 };
                 let q = status.ask_or_cancel(&prompt, "");
-                print!("\x1b[?25l");
+                print!("{}", Cursor::hide_seq());
                 std::io::stdout().flush().ok();
                 match q {
                     Some(q) if !q.trim().is_empty() => {
-                        status.say("\x1b[38;2;120;200;255m asking claude…\x1b[0m");
+                        status.say(&style::rgb(" asking claude…", Some(ASK_RGB), None, ""));
                         match ask_claude(&app, q.trim()) {
                             Ok(a) if !a.is_empty() => {
                                 app.chat.push((q.trim().to_string(), a));
@@ -270,8 +346,8 @@ fn main() {
                                 set_detail(&app, &mut detail, cols);
                                 status.say(&help_line());
                             }
-                            Ok(_) => status.say("\x1b[38;2;255;120;120mclaude returned nothing\x1b[0m"),
-                            Err(e) => status.say(&format!("\x1b[38;2;255;120;120mclaude: {e}\x1b[0m")),
+                            Ok(_) => status.say(&style::rgb("claude returned nothing", Some(ERR_RGB), None, "")),
+                            Err(e) => status.say(&style::rgb(&format!("claude: {e}"), Some(ERR_RGB), None, "")),
                         }
                     }
                     _ => status.say(&help_line()),
@@ -288,7 +364,7 @@ fn main() {
                 let msg = match result {
                     Ok(s) => {
                         if let Err(e) = data::save(&s) {
-                            format!("\x1b[38;2;255;120;120mcould not save cache: {e}\x1b[0m")
+                            style::rgb(&format!("could not save cache: {e}"), Some(ERR_RGB), None, "")
                         } else {
                             let cur = app.stars[app.sel].name.clone();
                             app.stars = s;
@@ -296,7 +372,7 @@ fn main() {
                             "catalog updated".to_string()
                         }
                     }
-                    Err(e) => format!("\x1b[38;2;255;120;120mfetch failed: {e}\x1b[0m"),
+                    Err(e) => style::rgb(&format!("fetch failed: {e}"), Some(ERR_RGB), None, ""),
                 };
                 Crust::init();
                 Crust::set_app_identity("Stars");
@@ -352,33 +428,74 @@ fn plot_pos(s: &Star) -> (f64, f64) {
     (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))
 }
 
-/// Move to the nearest star in the given direction on the diagram.
-/// `dir` is (dx, dy) with y pointing up in luminosity.
+/// Which plot cell a star falls in: (column, row), both 0-based.
+fn cell_index(s: &Star) -> (u16, u16) {
+    let (x, y) = plot_pos(s);
+    let cx = (x * (PLOT_W - 1) as f64).round() as u16;
+    let cy = ((1.0 - y) * (PLOT_H - 1) as f64).round() as u16;
+    (cx.min(PLOT_W - 1), cy.min(PLOT_H - 1))
+}
+
+/// Temperature and luminosity a cell covers, for the "empty cell" readout.
+fn cell_range(col: u16, row: u16) -> (f64, f64) {
+    let fx = col as f64 / (PLOT_W - 1) as f64;
+    let fy = 1.0 - row as f64 / (PLOT_H - 1) as f64;
+    let teff = 10f64.powf(LOG_T_HOT + fx * (LOG_T_COOL - LOG_T_HOT));
+    let lum = 10f64.powf(LOG_L_MIN + fy * (LOG_L_MAX - LOG_L_MIN));
+    (teff, lum)
+}
+
+/// Walk one cell at a time: scan along the row (or column) for the next
+/// cell holding a star. If that line is empty, fall back to the nearest
+/// occupied cell on that side, so a step never dead-ends.
 fn step(app: &mut App, dir: (i32, i32), detail: &mut Pane, cols: u16) {
-    let (cx, cy) = plot_pos(&app.stars[app.sel]);
+    let (cc, cr) = app.cur_cell();
+    let (mut c, mut r) = (cc as i32, cr as i32);
+    loop {
+        c += dir.0;
+        r -= dir.1; // screen rows grow downward, luminosity grows up
+        if c < 0 || r < 0 || c >= PLOT_W as i32 || r >= PLOT_H as i32 {
+            break;
+        }
+        if let Some(list) = app.cells.get(&(c as u16, r as u16)) {
+            let target = list[0];
+            select(app, target, detail, cols);
+            return;
+        }
+    }
+    // Nothing in that row / column: take the closest cell in that half.
     let mut best: Option<(f64, usize)> = None;
-    for (i, s) in app.stars.iter().enumerate() {
-        if i == app.sel {
-            continue;
-        }
-        let (x, y) = plot_pos(s);
-        let (dx, dy) = (x - cx, y - cy);
-        // Progress along the requested axis, in diagram units.
+    for (&(x, y), list) in app.cells.iter() {
+        let (dx, dy) = (x as f64 - cc as f64, cr as f64 - y as f64);
         let along = dx * dir.0 as f64 + dy * dir.1 as f64;
-        if along <= 1e-6 {
+        if along <= 0.0 {
             continue;
         }
-        // Prefer the closest star, penalising sideways drift so the
-        // cursor tracks a line rather than wandering across the plot.
         let across = (dx * dir.1 as f64).abs() + (dy * dir.0 as f64).abs();
-        let cost = along + across * 3.0;
+        let cost = along + across * 2.0;
         if best.map_or(true, |(b, _)| cost < b) {
-            best = Some((cost, i));
+            best = Some((cost, list[0]));
         }
     }
     if let Some((_, i)) = best {
         select(app, i, detail, cols);
     }
+}
+
+/// Cycle through the stars sharing the selected star's cell.
+fn cycle_cell(app: &mut App, forward: bool, detail: &mut Pane, cols: u16) {
+    let list = app.cur_cell_stars().to_vec();
+    if list.len() < 2 {
+        return;
+    }
+    let at = list.iter().position(|&i| i == app.sel).unwrap_or(0);
+    let next = if forward {
+        (at + 1) % list.len()
+    } else {
+        (at + list.len() - 1) % list.len()
+    };
+    app.cell_ix = next;
+    select(app, list[next], detail, cols);
 }
 
 fn select(app: &mut App, new: usize, detail: &mut Pane, cols: u16) {
@@ -438,6 +555,34 @@ const SRC_LEGEND: [(&str, (u8, u8, u8)); 3] = [
     ("from magnitude", (170, 150, 200)),
 ];
 
+/// The color a star of this temperature shows, interpolated across the
+/// spectral classes so the temperature axis reads as a real spectrum.
+fn teff_rgb(teff: f64) -> (u8, u8, u8) {
+    const STOPS: [(f64, (u8, u8, u8)); 7] = [
+        (40000.0, (120, 150, 255)),
+        (20000.0, (160, 195, 255)),
+        (9700.0, (225, 235, 255)),
+        (7200.0, (255, 245, 200)),
+        (5800.0, (255, 215, 90)),
+        (4400.0, (255, 150, 60)),
+        (3000.0, (255, 90, 60)),
+    ];
+    let t = teff.clamp(3000.0, 40000.0);
+    for w in STOPS.windows(2) {
+        let (t0, c0) = w[0];
+        let (t1, c1) = w[1];
+        if t <= t0 && t >= t1 {
+            let f = (t0.ln() - t.ln()) / (t0.ln() - t1.ln());
+            return (
+                (c0.0 as f64 + (c1.0 as f64 - c0.0 as f64) * f) as u8,
+                (c0.1 as f64 + (c1.1 as f64 - c0.1 as f64) * f) as u8,
+                (c0.2 as f64 + (c1.2 as f64 - c0.2 as f64) * f) as u8,
+            );
+        }
+    }
+    STOPS[0].1
+}
+
 fn gradient(t: f64) -> (u8, u8, u8) {
     let t = t.clamp(0.0, 1.0);
     let lerp = |a: (u8, u8, u8), b: (u8, u8, u8), t: f64| {
@@ -488,45 +633,50 @@ fn star_rgb(app: &App, s: &Star) -> (u8, u8, u8) {
 // ─────────────────────────── rendering ───────────────────────────────
 
 fn move_to(row: u16, col: u16) -> String {
-    format!("\x1b[{};{}H", row, col)
+    Cursor::at(col, row)
 }
 
 fn legend_string(app: &App) -> String {
     let mut s = String::new();
     if app.track > 0 {
         if app.track == tracks::TRACKS.len() + 1 {
-            s.push_str("\x1b[1;38;2;200;200;255mtracks: all\x1b[0m  ");
+            s.push_str(&style::rgb("tracks: all", Some((200, 200, 255)), None, "b"));
+            s.push_str("  ");
         } else {
             let t = &tracks::TRACKS[app.track - 1];
             let (r, g, b) = t.color;
-            s.push_str(&format!("\x1b[1;38;2;{r};{g};{b}mtrack {}\x1b[0m  ", t.mass));
+            s.push_str(&style::rgb(&format!("track {}", t.mass), Some((r, g, b)), None, "b"));
+            s.push_str("  ");
         }
     }
-    s.push_str(&format!("\x1b[1m{} {}\x1b[0m ", app.mode + 1, MODE_NAMES[app.mode]));
+    s.push_str(&style::bold(&format!("{} {}", app.mode + 1, MODE_NAMES[app.mode])));
+    s.push(' ');
     match app.mode {
         0 => {
             for (lbl, c) in CLASS_LEGEND {
                 let (r, g, b) = class_rgb(c);
-                s.push_str(&format!("\x1b[1;38;2;{r};{g};{b}m{lbl}\x1b[0m"));
+                s.push_str(&style::rgb(lbl, Some((r, g, b)), None, "b"));
             }
         }
         1 => {
-            for (lbl, (r, g, b)) in LUMCLASS_LEGEND.iter().take(7) {
-                s.push_str(&format!("\x1b[38;2;{r};{g};{b}m{lbl}\x1b[0m "));
+            for (lbl, rgb) in LUMCLASS_LEGEND.iter().take(7) {
+                s.push_str(&style::rgb(lbl, Some(*rgb), None, ""));
+                s.push(' ');
             }
         }
         6 => {
             for (lbl, (r, g, b)) in SRC_LEGEND {
-                s.push_str(&format!("\x1b[38;2;{r};{g};{b}m{lbl}\x1b[0m "));
+                s.push_str(&style::rgb(lbl, Some((r, g, b)), None, ""));
+                s.push(' ');
             }
         }
         _ => {
-            s.push_str("\x1b[2mlow \x1b[0m");
+            s.push_str(&style::dim("low "));
             for i in 0..14 {
                 let (r, g, b) = gradient(i as f64 / 13.0);
-                s.push_str(&format!("\x1b[38;2;{r};{g};{b}m█\x1b[0m"));
+                s.push_str(&style::rgb("█", Some((r, g, b)), None, ""));
             }
-            s.push_str("\x1b[2m high\x1b[0m");
+            s.push_str(&style::dim(" high"));
         }
     }
     s
@@ -535,12 +685,18 @@ fn legend_string(app: &App) -> String {
 fn draw_header(app: &App, cols: u16) {
     let s = &app.stars[app.sel];
     let (r, g, b) = class_rgb(s.class());
-    let bg = "\x1b[48;5;236m";
+    let bar_bg: (u8, u8, u8) = (38, 38, 38);
     let info = format!(
-        " {RUST}stars{RESET}  \x1b[1m{}{RESET}  \x1b[38;2;{r};{g};{b}m{}{RESET}  \x1b[2m{}\x1b[0m",
-        s.name,
-        if s.spectral.is_empty() { "—" } else { &s.spectral },
-        s.designation
+        " {}  {}  {}  {}",
+        style::rgb("stars", Some(RUST_RGB), None, "b"),
+        style::bold(&s.name),
+        style::rgb(
+            if s.spectral.is_empty() { "—" } else { &s.spectral },
+            Some((r, g, b)),
+            None,
+            ""
+        ),
+        style::dim(&s.designation)
     );
     let iw = crust::display_width(&info);
     let content = if cols >= SIDE_MIN && iw < SIDE_X as usize - 1 {
@@ -548,9 +704,16 @@ fn draw_header(app: &App, cols: u16) {
     } else {
         format!("{info}   {}", legend_string(app))
     };
-    let line = content.replace(RESET, &format!("{RESET}{bg}"));
     let pad = (cols as usize).saturating_sub(crust::display_width(&content));
-    print!("{}{bg}{line}{}{RESET}", move_to(1, 1), " ".repeat(pad));
+    // Re-arm the bar background after every reset inside the content.
+    let bar = style::rgb("", None, Some(bar_bg), "");
+    let armed = bar.trim_end_matches(RESET).to_string();
+    let line = content.replace(RESET, &format!("{RESET}{armed}"));
+    print!(
+        "{}{}",
+        move_to(1, 1),
+        style::rgb(&format!("{line}{}", " ".repeat(pad)), None, Some(bar_bg), "")
+    );
     std::io::stdout().flush().ok();
 }
 
@@ -566,7 +729,7 @@ fn cell_of(x: f64, y: f64) -> Option<(u16, u16)> {
 
 fn redraw_diagram(app: &App, cols: u16) {
     if cols < PLOT_X + PLOT_W {
-        print!("{}\x1b[2mterminal too narrow for the diagram\x1b[0m", move_to(PLOT_Y, 2));
+        print!("{}{}", move_to(PLOT_Y, 2), style::dim("terminal too narrow for the diagram"));
         std::io::stdout().flush().ok();
         return;
     }
@@ -591,7 +754,7 @@ fn redraw_diagram(app: &App, cols: u16) {
                 let y = (ll - LOG_L_MIN) / (LOG_L_MAX - LOG_L_MIN);
                 if let Some((row, col)) = cell_of(x, y) {
                     s.push_str(&move_to(row, col));
-                    s.push_str(&format!("\x1b[38;2;{r};{g};{b}m·\x1b[0m"));
+                    s.push_str(&style::rgb("·", Some((r, g, b)), None, ""));
                 }
             }
         }
@@ -609,9 +772,9 @@ fn redraw_diagram(app: &App, cols: u16) {
         let (r, g, b) = star_rgb(app, st);
         let glyph = if painted.contains(&(row, col)) { '*' } else { '·' };
         painted.push((row, col));
-        let bold = if st.mag < 2.0 { "1;" } else { "" };
+        let attrs = if st.mag < 2.0 { "b" } else { "" };
         s.push_str(&move_to(row, col));
-        s.push_str(&format!("\x1b[{bold}38;2;{r};{g};{b}m{glyph}\x1b[0m"));
+        s.push_str(&style::rgb(&glyph.to_string(), Some((r, g, b)), None, attrs));
         let _ = i;
     }
 
@@ -621,7 +784,7 @@ fn redraw_diagram(app: &App, cols: u16) {
     if let Some((row, col)) = cell_of(x, y) {
         let (r, g, b) = star_rgb(app, sel);
         s.push_str(&move_to(row, col));
-        s.push_str(&format!("\x1b[7;1;38;2;{r};{g};{b}m◉\x1b[0m"));
+        s.push_str(&style::rgb("◉", Some((r, g, b)), None, "br"));
     }
     print!("{s}");
     std::io::stdout().flush().ok();
@@ -633,20 +796,30 @@ fn draw_axes(cols: u16) {
         return;
     }
     let mut s = String::new();
-    // Y axis: log luminosity, ticked every other row.
+    // Y axis: log luminosity, ticked every other row. The rule brightens
+    // with the axis, dim grey at the faint end to white at the luminous.
     for r in 0..PLOT_H {
         let frac = 1.0 - r as f64 / (PLOT_H - 1) as f64;
         let ll = LOG_L_MIN + frac * (LOG_L_MAX - LOG_L_MIN);
+        let v = (60.0 + 195.0 * frac) as u8;
         s.push_str(&move_to(PLOT_Y + r, PLOT_X - 1));
-        s.push_str("\x1b[2m│\x1b[0m");
+        s.push_str(&style::rgb("│", Some((v, v, v)), None, ""));
         if r % 2 == 0 {
             s.push_str(&move_to(PLOT_Y + r, 1));
-            s.push_str(&format!("\x1b[2m{:>5.1}\x1b[0m", ll));
+            s.push_str(&style::dim(&format!("{ll:>5.1}")));
         }
     }
-    // X axis along the bottom.
+    // X axis along the bottom, tinted with the color a star of that
+    // temperature actually shines: blue at the hot end, red at the cool.
     s.push_str(&move_to(PLOT_Y + PLOT_H, PLOT_X - 1));
-    s.push_str(&format!("\x1b[2m└{}\x1b[0m", "─".repeat(PLOT_W as usize)));
+    // Dark slate corner: a bright one pulls the eye away from the plot.
+    s.push_str(&style::rgb("└", Some((70, 80, 100)), None, ""));
+    for c in 0..PLOT_W {
+        let f = c as f64 / (PLOT_W - 1) as f64;
+        let teff = 10f64.powf(LOG_T_HOT + f * (LOG_T_COOL - LOG_T_HOT));
+        let (r, g, b) = teff_rgb(teff);
+        s.push_str(&style::rgb("─", Some((r, g, b)), None, ""));
+    }
     // Temperature ticks at round values.
     let ticks: [f64; 7] = [40000.0, 20000.0, 10000.0, 7000.0, 5000.0, 3500.0, 2500.0];
     s.push_str(&move_to(PLOT_Y + PLOT_H + 1, 1));
@@ -664,18 +837,17 @@ fn draw_axes(cols: u16) {
             row.replace_range(start..start + label.len(), &label);
         }
     }
-    s.push_str(&format!("\x1b[2m{row}\x1b[0m"));
-    // Axis names.
-    s.push_str(&move_to(PLOT_Y + PLOT_H + 2, PLOT_X));
-    s.push_str("\x1b[2m← hotter        effective temperature (K)        cooler →\x1b[0m");
-    s.push_str(&move_to(PLOT_Y - 1, 1));
-    s.push_str("\x1b[2mlog L/L☉\x1b[0m");
+    s.push_str(&style::dim(&row));
+    // Axis names, both on the caption row so the row under the header
+    // bar stays empty.
+    s.push_str(&move_to(PLOT_Y + PLOT_H + 2, 1));
+    s.push_str(&style::dim("↑ log L/L☉   ← hotter     effective temperature (K)     cooler →"));
     print!("{s}");
     std::io::stdout().flush().ok();
 }
 
 fn help_line() -> String {
-    "\x1b[2m←↓↑→ move · Tab brightest · 1-7/m color · t tracks · / find · c claude · ? help · q quit\x1b[0m".to_string()
+    style::dim("←↓↑→ cell · Tab in-cell · ⏎ list · 1-7/m color · t tracks · / find · c claude · ? help · q")
 }
 
 fn draw_all(app: &App, detail: &mut Pane, status: &mut Pane, cols: u16, _rows: u16) {
@@ -720,18 +892,15 @@ fn fmt_num(v: f64) -> String {
     }
 }
 
-/// The star's numbers, as label/value rows.
-fn prop_rows(s: &Star) -> Vec<(String, String)> {
+/// The star itself: what it is and what it puts out.
+fn star_rows(s: &Star) -> Vec<(String, String)> {
     let mut v: Vec<(String, String)> = Vec::new();
     if !s.spectral.is_empty() {
         v.push(("spectral".into(), s.spectral.clone()));
     }
     if !s.lum_class.is_empty() {
         let g = data::lum_class_group(&s.lum_class);
-        v.push((
-            "class".into(),
-            format!("{} ({})", s.lum_class, LUMCLASS_LEGEND[g].0),
-        ));
+        v.push(("class".into(), format!("{} ({})", s.lum_class, LUMCLASS_LEGEND[g].0)));
     }
     v.push(("temperature".into(), format!("{:.0} K", s.teff)));
     v.push(("luminosity".into(), format!("{} L☉", fmt_num(s.lum))));
@@ -741,10 +910,14 @@ fn prop_rows(s: &Star) -> Vec<(String, String)> {
     if let Some(m) = s.mass {
         v.push(("mass".into(), format!("{} M☉", fmt_num(m))));
     }
-    v.push((
-        "distance".into(),
-        format!("{:.1} ly  ({:.1} pc)", s.dist_ly(), s.dist_pc),
-    ));
+    v
+}
+
+/// How it appears from here.
+fn sky_rows(s: &Star) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = Vec::new();
+    v.push(("distance".into(), format!("{:.1} ly", s.dist_ly())));
+    v.push(("".into(), format!("{:.1} pc", s.dist_pc)));
     v.push(("apparent mag".into(), format!("{:.2}", s.mag)));
     v.push(("absolute mag".into(), format!("{:.2}", s.absmag)));
     if let Some(ci) = s.color_index {
@@ -759,27 +932,119 @@ fn prop_rows(s: &Star) -> Vec<(String, String)> {
     v
 }
 
+const LBL_W: usize = 13;
+
+/// One label/value row of a boxed table: dim label, plain value.
+fn table_cell(entry: Option<&(String, String)>, cell: usize) -> String {
+    match entry {
+        Some((l, v)) => format!(
+            " {}{} ",
+            style::dim(&format!("{l:<LBL_W$}")),
+            fit(v, cell.saturating_sub(LBL_W + 2))
+        ),
+        None => " ".repeat(cell),
+    }
+}
+
+/// Top rule of a boxed column: `┌─ Title ───────┐` (or `┬` between columns).
+fn table_top(title: &str, cell: usize, opener: &str, closer: &str) -> String {
+    let rule = "─".repeat(cell.saturating_sub(3 + title.chars().count()));
+    format!(
+        "{}{}{}",
+        style::dim(&format!("{opener}─ ")),
+        style::bold(title),
+        style::dim(&format!(" {rule}{closer}"))
+    )
+}
+
+/// Two labelled columns in a box-drawn table, same shape as elements'.
+fn prop_table(lt: &str, left: &[(String, String)], rt: &str, right: &[(String, String)], cell: usize) -> String {
+    let bar = style::dim("│");
+    let mut s = format!(
+        "{}{}\n",
+        table_top(lt, cell, "┌", "┬"),
+        table_top(rt, cell, "", "┐")
+    );
+    for i in 0..left.len().max(right.len()) {
+        s.push_str(&format!(
+            "{bar}{}{bar}{}{bar}\n",
+            table_cell(left.get(i), cell),
+            table_cell(right.get(i), cell)
+        ));
+    }
+    let rule = "─".repeat(cell);
+    s.push_str(&style::dim(&format!("└{rule}┴{rule}┘")));
+    s.push('\n');
+    s
+}
+
+/// One labelled column, for side panels too narrow to hold two.
+fn prop_table_single(title: &str, rows: &[(String, String)], cell: usize) -> String {
+    let bar = style::dim("│");
+    let mut s = format!("{}\n", table_top(title, cell, "┌", "┐"));
+    for r in rows {
+        s.push_str(&format!("{bar}{}{bar}\n", table_cell(Some(r), cell)));
+    }
+    s.push_str(&style::dim(&format!("└{}┘", "─".repeat(cell))));
+    s.push('\n');
+    s
+}
+
+fn fit(v: &str, w: usize) -> String {
+    let n = v.chars().count();
+    if n <= w {
+        format!("{v}{}", " ".repeat(w - n))
+    } else {
+        let mut t: String = v.chars().take(w.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    }
+}
+
 fn draw_side(app: &App, cols: u16) {
     if cols < SIDE_MIN {
         return;
     }
     let avail = (cols - SIDE_X + 1) as usize;
     let s = &app.stars[app.sel];
-    let dim = "\x1b[2m";
-    let mut lines: Vec<String> = Vec::new();
     let (r, g, b) = class_rgb(s.class());
-    lines.push(format!("\x1b[1;38;2;{r};{g};{b}m{}{RESET}", s.name));
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!(
+        "{}  {}",
+        style::rgb(&s.name, Some((r, g, b)), None, "b"),
+        style::dim(&s.designation)
+    ));
     lines.push(String::new());
-    for (k, v) in prop_rows(s) {
-        lines.push(format!("{dim}{k:<14}{RESET}{v}"));
-    }
+
+    // Two columns when there is room, otherwise stack them.
+    let table = if avail >= 76 {
+        let cell = ((avail - 3) / 2).min(38);
+        prop_table("Star", &star_rows(s), "Sky", &sky_rows(s), cell)
+    } else {
+        let cell = avail.saturating_sub(2).min(40);
+        format!(
+            "{}{}",
+            prop_table_single("Star", &star_rows(s), cell),
+            prop_table_single("Sky", &sky_rows(s), cell)
+        )
+    };
+    lines.extend(table.lines().map(|l| l.to_string()));
     lines.push(String::new());
     lines.push(format!(
-        "{dim}{:<14}{RESET}T {}, L {}",
-        "source",
+        "{}T {}, L {}",
+        style::dim("source        "),
         s.teff_src.label(),
         s.lum_src.label()
     ));
+    // How crowded the cursor's cell is, so Tab has an obvious purpose.
+    let n = app.cur_cell_stars().len();
+    if n > 1 {
+        lines.push(format!(
+            "{}{n} stars  {}",
+            style::dim("this cell     "),
+            style::dim("(Tab cycles, Enter lists)")
+        ));
+    }
 
     let blank = " ".repeat(avail);
     let mut out = String::new();
@@ -798,7 +1063,6 @@ fn draw_side(app: &App, cols: u16) {
 
 /// The stages of the active track, in the order the star passes through.
 fn track_text(app: &App) -> String {
-    let head = "\x1b[1;38;2;247;140;60m";
     let all = app.track == tracks::TRACKS.len() + 1;
     let mut s = String::new();
     for (i, t) in tracks::TRACKS.iter().enumerate() {
@@ -806,40 +1070,44 @@ fn track_text(app: &App) -> String {
             continue;
         }
         let (r, g, b) = t.color;
-        s.push_str(&format!("{head}Evolutionary track, {}{RESET} \x1b[2m(schematic)\x1b[0m\n", t.mass));
+        s.push_str(&format!(
+            "{} {}\n",
+            style::rgb(&format!("Evolutionary track, {}", t.mass), Some(HEAD_RGB), None, "b"),
+            style::dim("(schematic)")
+        ));
         let stages: Vec<String> = t
             .stages
             .iter()
-            .map(|(_, _, name)| format!("\x1b[38;2;{r};{g};{b}m{name}\x1b[0m"))
+            .map(|(_, _, name)| style::rgb(name, Some((r, g, b)), None, ""))
             .collect();
-        s.push_str(&stages.join(" \x1b[2m→\x1b[0m "));
+        s.push_str(&stages.join(&format!(" {} ", style::dim("→"))));
         s.push('\n');
     }
     s
 }
 
 fn modes_text(app: &App) -> String {
-    let head = "\x1b[1;38;2;247;140;60m";
-    let mut s = format!("{head}Color modes{RESET}\n\n");
+    let mut s = format!("{}\n\n", style::rgb("Color modes", Some(HEAD_RGB), None, "b"));
     for (i, name) in MODE_NAMES.iter().enumerate() {
         let marker = if i == app.mode { "●" } else { " " };
         let line = format!("  {marker} {:>2}  {name}", i + 1);
         if i == app.menu_ix {
-            s.push_str(&format!("\x1b[7m{}\x1b[0m\n", crust::pad_display(&line, 34)));
+            s.push_str(&format!("{}\n", style::reverse(&crust::pad_display(&line, 34))));
         } else {
             s.push_str(&format!("{line}\n"));
         }
     }
-    s.push_str("\n\x1b[2mj/k move · ENTER pick · 1-7 direct · Ctrl+←/→ cycle · ESC back\x1b[0m\n");
+    s.push_str(&format!("\n{}\n", style::dim("j/k move · ENTER pick · 1-7 direct · Ctrl+←/→ cycle · ESC back")));
     s
 }
 
 fn help_text() -> String {
     format!(
-        "{RUST}stars — keys{RESET}\n\n\
-         \x20 ← ↑ ↓ → / h j k l   move to the nearest star that way on the diagram\n\
-         \x20 Tab / Shift-Tab     next / previous star by apparent brightness\n\
-         \x20 < > or n p          same as Tab / Shift-Tab\n\
+        "{}\n\n\
+         \x20 ← ↑ ↓ → / h j k l   walk the diagram a cell at a time\n\
+         \x20 Tab / Shift-Tab     cycle the stars sharing the cursor's cell\n\
+         \x20 ENTER               list every star in the cell and pick one\n\
+         \x20 < > or n p          previous / next star by apparent brightness\n\
          \x20 1-7, Ctrl+← →       color mode: 1 spectral class · 2 luminosity class ·\n\
          \x20                     3 distance · 4 apparent magnitude · 5 mass ·\n\
          \x20                     6 radius · 7 data source\n\
@@ -862,34 +1130,37 @@ fn help_text() -> String {
          masses from Wikidata where published, and the rest are derived from the\n\
          spectral type and absolute magnitude. Mode 7 colors by which is which.\n\n\
          The evolutionary tracks are SCHEMATIC: they show the shape and order of\n\
-         the stages a star of that mass passes through, not a computed model."
+         the stages a star of that mass passes through, not a computed model.",
+        style::rgb("stars — keys", Some(RUST_RGB), None, "b")
     )
 }
 
 fn detail_text(s: &Star, side: bool) -> String {
     let (r, g, b) = class_rgb(s.class());
-    let dim = "\x1b[2m";
-    let head = "\x1b[1;38;2;247;140;60m";
-    let mut out = String::new();
+    // A blank line so the pane's first row is never flush against the
+    // diagram's caption row.
+    let mut out = String::from("\n");
     if !side {
         out.push_str(&format!(
-            "\x1b[1;38;2;{r};{g};{b}m{}{RESET}  {}  \x1b[2m{}\x1b[0m\n\n",
-            s.name, s.spectral, s.designation
+            "{}  {}  {}\n\n",
+            style::rgb(&s.name, Some((r, g, b)), None, "b"),
+            s.spectral,
+            style::dim(&s.designation)
         ));
-        for (k, v) in prop_rows(s) {
-            out.push_str(&format!("{dim}{k:<14}{RESET}{v}\n"));
+        for (k, v) in star_rows(s).into_iter().chain(sky_rows(s)) {
+            out.push_str(&format!("{}{v}\n", style::dim(&format!("{k:<14}"))));
         }
         out.push_str(&format!(
-            "{dim}{:<14}{RESET}T {}, L {}\n\n",
-            "source",
+            "{}T {}, L {}\n\n",
+            style::dim(&format!("{:<14}", "source")),
             s.teff_src.label(),
             s.lum_src.label()
         ));
     }
     if s.article.is_empty() {
-        out.push_str("\x1b[2mNo Wikipedia article cached for this star.\x1b[0m\n");
+        out.push_str(&format!("{}\n", style::dim("No Wikipedia article cached for this star.")));
     } else {
-        out.push_str(&format!("{head}Wikipedia article{RESET}\n"));
+        out.push_str(&format!("{}\n", style::rgb("Wikipedia article", Some(HEAD_RGB), None, "b")));
         out.push_str(&style_article(&s.article));
     }
     out
@@ -913,9 +1184,9 @@ fn style_article(a: &str) -> String {
                 break;
             }
             out.push(match level {
-                2 => format!("\x1b[1;38;2;247;140;60m{title}{RESET}"),
-                3 => format!("  \x1b[1;38;2;250;200;130m{title}{RESET}"),
-                _ => format!("    \x1b[1;38;2;200;170;140m{title}{RESET}"),
+                2 => style::rgb(title, Some(HEAD_RGB), None, "b"),
+                3 => format!("  {}", style::rgb(title, Some((250, 200, 130)), None, "b")),
+                _ => format!("    {}", style::rgb(title, Some((200, 170, 140)), None, "b")),
             });
         } else if let Some(p) = line.find("{\\displaystyle").or_else(|| line.find("{\\textstyle")) {
             while matches!(out.last(), Some(l) if l.is_empty() || l.starts_with(' ')) {
@@ -925,7 +1196,7 @@ fn style_article(a: &str) -> String {
             let inner = rest.find(' ').map(|i| rest[i + 1..].trim_end()).unwrap_or("");
             let inner = inner.strip_suffix('}').unwrap_or(inner).trim();
             if !inner.is_empty() {
-                out.push(format!("    \x1b[38;2;150;200;255m{inner}\x1b[0m"));
+                out.push(format!("    {}", style::rgb(inner, Some((150, 200, 255)), None, "")));
             }
         } else {
             if !line.trim().is_empty()
@@ -1017,15 +1288,14 @@ fn ask_claude(app: &App, question: &str) -> Result<String, String> {
 
 fn chat_text(app: &App) -> String {
     let s = &app.stars[app.sel];
-    let head = "\x1b[1;38;2;247;140;60m";
-    let mut out = format!("{head}Claude — {}{RESET}\n\n", s.name);
+    let mut out = format!("{}\n\n", style::rgb(&format!("Claude — {}", s.name), Some(HEAD_RGB), None, "b"));
     if app.chat.is_empty() {
-        out.push_str("\x1b[2mPress c to ask a question about this star.\x1b[0m\n");
+        out.push_str(&format!("{}\n", style::dim("Press c to ask a question about this star.")));
         return out;
     }
     for (q, a) in &app.chat {
-        out.push_str(&format!("\x1b[1;38;2;120;200;255m? {q}{RESET}\n\n{a}\n\n"));
+        out.push_str(&format!("{}\n\n{a}\n\n", style::rgb(&format!("? {q}"), Some(ASK_RGB), None, "b")));
     }
-    out.push_str("\x1b[2mc: ask a follow-up · ESC: back to the article\x1b[0m\n");
+    out.push_str(&format!("{}\n", style::dim("c: ask a follow-up · ESC: back to the article")));
     out
 }
