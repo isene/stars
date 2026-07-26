@@ -23,7 +23,7 @@ use std::io::Write;
 // Diagram geometry. The plot area is a fixed box; the article pane and
 // the property block flow around it.
 const PLOT_X: u16 = 8; // first column of the plot area
-const PLOT_Y: u16 = 4; // first row of the plot area (row 2 stays blank)
+const PLOT_Y: u16 = 3; // first row of the plot area (row 2 stays blank)
 const PLOT_W: u16 = 62;
 const PLOT_H: u16 = 17;
 const SIDE_X: u16 = PLOT_X + PLOT_W + 4; // property block column
@@ -735,10 +735,17 @@ fn draw_header(app: &App, cols: u16) {
     let s = &app.stars[app.sel];
     let (r, g, b) = class_rgb(s.class());
     let bar_bg: (u8, u8, u8) = (38, 38, 38);
+    let here = app.cur_cell_stars().len();
+    let crowd = if here > 1 {
+        style::rgb(&format!(" +{}", here - 1), Some((255, 170, 80)), None, "b")
+    } else {
+        String::new()
+    };
     let info = format!(
-        " {}  {}  {}  {}",
+        " {}  {}{}  {}  {}",
         style::rgb("stars", Some(RUST_RGB), None, "b"),
         style::bold(&s.name),
+        crowd,
         style::rgb(
             if s.spectral.is_empty() { "—" } else { &s.spectral },
             Some((r, g, b)),
