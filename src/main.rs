@@ -1381,6 +1381,9 @@ const TAIL_SECTIONS: [&str; 9] = [
 /// Same article cleanup as elements: heading hierarchy, math dumps
 /// collapsed, reference tail dropped, blank line between paragraphs.
 fn style_article(a: &str) -> String {
+    // crust folds the extract's math blocks into single inline
+    // expressions and clears the debris left by dropped templates.
+    let a = crust::text::clean_wiki_extract(a);
     let mut out: Vec<String> = Vec::new();
     for line in a.lines() {
         let t = line.trim();
@@ -1395,16 +1398,6 @@ fn style_article(a: &str) -> String {
                 3 => format!("  {}", style::rgb(title, Some((250, 200, 130)), None, "b")),
                 _ => format!("    {}", style::rgb(title, Some((200, 170, 140)), None, "b")),
             });
-        } else if let Some(p) = line.find("{\\displaystyle").or_else(|| line.find("{\\textstyle")) {
-            while matches!(out.last(), Some(l) if l.is_empty() || l.starts_with(' ')) {
-                out.pop();
-            }
-            let rest = &line[p..];
-            let inner = rest.find(' ').map(|i| rest[i + 1..].trim_end()).unwrap_or("");
-            let inner = inner.strip_suffix('}').unwrap_or(inner).trim();
-            if !inner.is_empty() {
-                out.push(format!("    {}", style::rgb(inner, Some((150, 200, 255)), None, "")));
-            }
         } else {
             if !line.trim().is_empty()
                 && matches!(out.last(), Some(l) if !l.trim().is_empty() && !l.contains('\x1b'))
