@@ -8,6 +8,8 @@
 
 Every named star with a measured parallax, plotted where it belongs on the HR diagram: temperature across, luminosity up. Walk between them with the arrow keys, read each star's numbers and its full Wikipedia article, and lay schematic evolutionary tracks over the plot to see where a star of a given mass goes when it leaves the main sequence. Built on [Crust](https://github.com/isene/crust), part of the [Fe2O3 suite](https://github.com/isene/fe2o3).
 
+![The HR diagram](img/screenshot-hr.png)
+
 ## Features
 
 - **461 named stars** from the HYG catalog, plotted in log Teff against log luminosity
@@ -19,6 +21,12 @@ Every named star with a measured parallax, plotted where it belongs on the HR di
 - **Ask Claude** (`c`) about the star you are looking at, with its data and article as context
 - **Zero idle cost**: event-driven, no timers, no polling
 - **Offline**: one fetch, then everything is local
+
+### Evolutionary tracks
+
+Press `t` and a schematic track for 1, 5 or 15 M☉ is laid over the diagram, with every stage named below it: up the giant branch, back across the top at constant luminosity as a planetary nebula nucleus, then down the white dwarf cooling track.
+
+![Evolutionary tracks](img/screenshot-tracks.png)
 
 ## Install
 
