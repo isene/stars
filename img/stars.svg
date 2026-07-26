@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0a0a14"/>
+    </linearGradient>
+    <linearGradient id="rust" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f74c00"/>
+      <stop offset="100%" style="stop-color:#b7410e"/>
+    </linearGradient>
+    <linearGradient id="ms" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8ca0ff"/>
+      <stop offset="45%" style="stop-color:#fff6c8"/>
+      <stop offset="100%" style="stop-color:#ff5a3c"/>
+    </linearGradient>
+  </defs>
+  <style>
+    @keyframes twinkle { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @keyframes creep   { 0%,100% { opacity: 0.9; } 50% { opacity: 0.3; } }
+    .t1 { animation: twinkle 2.8s ease-in-out infinite; }
+    .t2 { animation: twinkle 2.8s ease-in-out 0.9s infinite; }
+    .t3 { animation: twinkle 2.8s ease-in-out 1.8s infinite; }
+    .trk { animation: creep 3.4s ease-in-out infinite; }
+  </style>
+  <circle cx="128" cy="128" r="120" fill="url(#bg)" stroke="url(#rust)" stroke-width="3"/>
+
+  <!-- Axes: luminosity up, temperature increasing to the LEFT -->
+  <g stroke="#555" stroke-width="1.5" fill="none">
+    <path d="M 56 176 L 204 176"/>
+    <path d="M 56 176 L 56 52"/>
+  </g>
+
+  <!-- The main sequence, hot+bright upper left to cool+faint lower right -->
+  <path d="M 74 66 C 108 96, 140 128, 190 166" stroke="url(#ms)" stroke-width="7"
+        stroke-linecap="round" fill="none" opacity="0.95"/>
+
+  <!-- Giant branch, up and to the right of the main sequence -->
+  <path d="M 132 120 C 152 108, 172 100, 192 96" stroke="#ffb347" stroke-width="5"
+        stroke-linecap="round" fill="none" class="trk"/>
+
+  <!-- White dwarfs, hot but faint -->
+  <circle cx="86" cy="158" r="3" fill="#dfe7ff" class="t3"/>
+  <circle cx="96" cy="164" r="2.5" fill="#dfe7ff"/>
+
+  <!-- A few named points -->
+  <circle cx="190" cy="94" r="5" fill="#ff5a3c" class="t1"/>
+  <circle cx="86"  cy="72" r="4" fill="#9bb0ff" class="t2"/>
+  <circle cx="139" cy="128" r="4.5" fill="#ffd34d"/>
+  <circle cx="139" cy="128" r="8" fill="none" stroke="#f74c00" stroke-width="2"/>
+
+  <text x="128" y="212" font-family="monospace" font-size="24" font-weight="bold"
+        fill="url(#rust)" text-anchor="middle" letter-spacing="3">stars</text>
+  <text x="128" y="228" font-family="monospace" font-size="8" fill="#888"
+        text-anchor="middle">HR diagram explorer</text>
+</svg>
