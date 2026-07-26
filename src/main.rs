@@ -185,6 +185,8 @@ fn main() {
     // Margins: two blank columns on the left, three on the right, so the
     // article never runs into the terminal's edges.
     let mut detail = Pane::new(3, DETAIL_Y, cols.saturating_sub(5), rows.saturating_sub(DETAIL_Y).max(1), 253, 0);
+    // Park the scroll markers out in the right margin, clear of the text.
+    detail.scroll_x = Some(cols);
     let mut status = Pane::new(1, rows, cols, 1, 250, 236);
     status.scroll = false;
 
@@ -399,6 +401,7 @@ fn main() {
                 cols = c;
                 rows = r;
                 detail.w = cols.saturating_sub(5);
+                detail.scroll_x = Some(cols);
                 detail.h = rows.saturating_sub(DETAIL_Y).max(1);
                 status.y = rows;
                 status.w = cols;
