@@ -182,9 +182,9 @@ fn main() {
     Crust::init();
     Crust::set_app_identity("Stars");
     let (mut cols, mut rows) = Crust::terminal_size();
-    // One blank column each side: the article should not run into the
-    // terminal's edges.
-    let mut detail = Pane::new(2, DETAIL_Y, cols.saturating_sub(2), rows.saturating_sub(DETAIL_Y).max(1), 253, 0);
+    // Margins: two blank columns on the left, three on the right, so the
+    // article never runs into the terminal's edges.
+    let mut detail = Pane::new(3, DETAIL_Y, cols.saturating_sub(5), rows.saturating_sub(DETAIL_Y).max(1), 253, 0);
     let mut status = Pane::new(1, rows, cols, 1, 250, 236);
     status.scroll = false;
 
@@ -398,7 +398,7 @@ fn main() {
                 let (c, r) = Crust::terminal_size();
                 cols = c;
                 rows = r;
-                detail.w = cols.saturating_sub(2);
+                detail.w = cols.saturating_sub(5);
                 detail.h = rows.saturating_sub(DETAIL_Y).max(1);
                 status.y = rows;
                 status.w = cols;
