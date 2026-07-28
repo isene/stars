@@ -24,6 +24,16 @@ Every named star with a measured parallax, plotted where it belongs on the HR di
 - **Zero idle cost**: event-driven, no timers, no polling
 - **Offline**: one fetch, then everything is local
 
+### The sky
+
+Press `M` and the celestial sphere comes up in braille. Walk it with the
+arrows, `f` flips between the northern and southern half, `+`/`-` zoom
+about the crosshair, and the star under it is named at the bottom with
+its magnitude, spectral type and distance. `Enter` takes it back to the
+diagram.
+
+![The sky picker](img/screenshot-sky.png)
+
 ### Evolutionary tracks
 
 Press `t` and a schematic track for 1, 5 or 15 M☉ is laid over the diagram, with every stage named below it: up the giant branch, back across the top at constant luminosity as a planetary nebula nucleus, then down the white dwarf cooling track.
