@@ -101,6 +101,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fe2o3-starmap"
+version = "0.1.0"
+dependencies = [
+ "fe2o3-crust",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -545,9 +552,10 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stars"
-version = "0.1.10"
+version = "0.2.0"
 dependencies = [
  "fe2o3-crust",
+ "fe2o3-starmap",
  "serde",
  "serde_json",
  "ureq",

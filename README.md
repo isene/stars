@@ -19,6 +19,7 @@ Every named star with a measured parallax, plotted where it belongs on the HR di
 - **Evolutionary tracks** (`t`): schematic paths for 1, 5 and 15 M☉, with their stages named below the diagram, from ZAMS through the giant branch to a white dwarf or a supernova
 - **Honest about its numbers**: measured values come from Wikidata, the rest are derived from the spectral type and absolute magnitude, and mode 7 colors the diagram by which is which
 - **The right Wikipedia article**: a star's IAU name is often a word first (Tupi is a people, Anser a genus of geese, Pollux a demigod), so each candidate page is checked before it is kept, falling through to `<name> (star)` and the HD / HIP designations. Cached locally for 445 of the 461
+- **Pick a star off the sky** (`M`): the celestial sphere in braille, 9,096 stars from the Bright Star Catalogue, `f` flips between the northern and southern half, `+`/`-` zoom, and `Enter` brings the star under the crosshair back to the diagram. One the catalog knows arrives with its article; anything else joins as a guest, placed from its Hipparcos distance and Bright Star colour. Drawn by [starmap](https://github.com/isene/starmap)
 - **Ask Claude** (`c`) about the star you are looking at, with its data and article as context
 - **Zero idle cost**: event-driven, no timers, no polling
 - **Offline**: one fetch, then everything is local
@@ -52,6 +53,7 @@ First start builds the catalog (about three minutes), then the app works offline
 | < >, n p | Previous / next star in the catalog |
 | 1-7, Ctrl+←/→ | Color mode |
 | m | Mode menu |
+| M | The sky: walk it with the arrows, `f` flips north / south, `+`/`-` zoom, `c` figures, `n` names, `Enter` takes that star to the diagram |
 | t | Evolutionary tracks: off → 1 M☉ → 5 M☉ → 15 M☉ → all |
 | J K, Shift+↓/↑ | Scroll the article one line |
 | Space, PgUp/PgDn | Scroll the article one page |
@@ -78,6 +80,8 @@ stars [STAR] [--fetch]
 Positions, magnitudes, spectral types and distances come from the [HYG database](https://github.com/astronexus/HYG-Database) (Hipparcos + Yale + Gliese). Rows without a usable parallax are dropped, since their absolute magnitudes are meaningless.
 
 Effective temperatures, luminosities, radii and masses come from Wikidata where they are published (119 stars have a measured temperature). Everything else is derived: temperature from the spectral type on the standard main-sequence scale, or from the B-V color index via Ballesteros' formula; luminosity from radius and temperature, or from the absolute magnitude with a bolometric correction. The detail panel names the source for every star, and color mode 7 shows it across the whole diagram.
+
+Stars picked off the sky map (`M`) come from the [Yale Bright Star Catalogue](http://tdc-www.harvard.edu/catalogs/bsc5.html) with [Hipparcos](https://cdsarc.cds.unistra.fr/viz-bin/cat/I/239) parallaxes, via [starmap](https://github.com/isene/starmap). Their temperature and luminosity are derived, never measured, and the detail panel says so.
 
 **The evolutionary tracks are schematic.** They show the shape and the order of the stages a star of that mass passes through, not a computed stellar model.
 

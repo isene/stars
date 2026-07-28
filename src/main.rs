@@ -298,6 +298,12 @@ fn main() {
                 draw_header(&app, cols);
                 redraw_diagram(&app, cols);
             }
+            "M" => {
+                if let Some(i) = sky_pick(&mut app) {
+                    select(&mut app, i, &mut detail, cols);
+                }
+                draw_all(&app, &mut detail, &mut status, cols, rows);
+            }
             "m" => {
                 app.view = if app.view == View::Modes { View::Article } else { View::Modes };
                 app.menu_ix = app.mode;
@@ -1051,7 +1057,71 @@ fn draw_axes(cols: u16) {
 }
 
 fn help_line() -> String {
-    style::dim("←↓↑→ cell · Tab in-cell · ⏎ cell list · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q")
+    style::dim("←↓↑→ cell · Tab in-cell · ⏎ cell list · M sky · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q")
+}
+
+/// Open the sky, let the user walk to a star, and land on it in the
+/// diagram. Returns the index in `app.stars` to select.
+///
+/// A star the catalogue already knows is matched on HD, then HIP, then
+/// name. Anything else joins the diagram as a guest: the sky map carries
+/// magnitude, colour, spectral type and a Hipparcos distance, which is
+/// everything the axes need. Guests live for the session, so the shelf
+/// on disk stays the 461 stars with articles behind them.
+fn sky_pick(app: &mut App) -> Option<usize> {
+    let start = starmap::View::new(starmap::Projection::Hemisphere { north: true });
+    let picked = starmap::pick(start, starmap::Opts::default(), "stars")?;
+    let p = picked.star;
+
+    let hd = if p.hd > 0 { p.hd.to_string() } else { String::new() };
+    let hip = if p.hip > 0 { p.hip.to_string() } else { String::new() };
+    let known = app.stars.iter().position(|s| {
+        (!hd.is_empty() && s.hd == hd)
+            || (!hip.is_empty() && s.hip == hip)
+            || (!p.name.is_empty() && s.name == p.name)
+    });
+    if let Some(i) = known {
+        return Some(i);
+    }
+
+    // A guest needs a place on both axes, and that needs a distance.
+    let absmag = p.absmag()?;
+    let ci = p.bv;
+    let teff = match ci {
+        Some(c) => data::teff_from_color(c),
+        None => return None,
+    };
+    let star = data::Star {
+        name: p.label(),
+        designation: String::new(),
+        constellation: String::new(),
+        hip,
+        hd,
+        spectral: p.spectral.to_string(),
+        lum_class: data::luminosity_class(p.spectral),
+        dist_pc: p.dist_pc.unwrap_or(0.0),
+        mag: p.mag,
+        absmag,
+        color_index: ci,
+        teff,
+        teff_src: data::Src::Color,
+        lum: data::lum_from_absmag(absmag, teff),
+        lum_src: data::Src::Magnitude,
+        radius: None,
+        mass: None,
+        article: format!(
+            "{}\n\nPicked off the sky map. The Bright Star Catalogue has its \
+             position, magnitude, colour and spectral type; the distance is the \
+             Hipparcos parallax. Temperature and luminosity below are worked out \
+             from those, not measured, so the article shelf has nothing on this \
+             one.",
+            p.label()
+        ),
+        source: "Yale Bright Star Catalogue + Hipparcos".to_string(),
+    };
+    app.stars.push(star);
+    app.build_cells();
+    Some(app.stars.len() - 1)
 }
 
 fn draw_all(app: &App, detail: &mut Pane, status: &mut Pane, cols: u16, _rows: u16) {
@@ -1323,6 +1393,8 @@ fn help_text() -> String {
          \x20                     3 distance · 4 apparent magnitude · 5 mass ·\n\
          \x20                     6 radius · 7 data source\n\
          \x20 m                   mode menu\n\
+         \x20 M                   the sky: walk it, zoom, f flips north / south,\n\
+         \x20                     ENTER brings that star back to the diagram\n\
          \x20 t                   evolutionary tracks: off → 1 M☉ → 5 M☉ → 15 M☉ → all\n\
          \x20 J K / Shift-↓ ↑     scroll the article one line\n\
          \x20 Space, PgDn/PgUp    scroll the article one page\n\
