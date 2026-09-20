@@ -989,8 +989,7 @@ fn redraw_diagram(app: &App, cols: u16) {
         std::io::stdout().flush().ok();
         let canvas = diagram_canvas(app, None);
         if let Some(d) = app.pixels.borrow_mut().as_mut() {
-            d.clear_all();
-            d.show_canvas(&canvas, PLOT_X, PLOT_Y);
+            d.swap_canvas(&canvas, PLOT_X, PLOT_Y);
         }
         return;
     }
