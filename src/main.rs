@@ -74,6 +74,8 @@ struct App {
     view: View,
     menu_ix: usize,
     chat: Vec<(String, String)>,
+    /// The diagram as a picture, where the terminal shows images.
+    pixels: std::cell::RefCell<Option<glow::Display>>,
 }
 
 impl App {
@@ -175,6 +177,7 @@ fn main() {
         view: View::Article,
         menu_ix: 0,
         chat: Vec::new(),
+        pixels: Default::default(),
     };
     app.build_cells();
     app.cell_ix = app.cur_cell_stars().iter().position(|&i| i == app.sel).unwrap_or(0);
@@ -377,6 +380,7 @@ fn main() {
                 set_detail(&app, &mut detail, cols);
             }
             "u" => {
+                hide_diagram(&app);
                 Crust::cleanup();
                 println!("stars: rebuilding the catalog …");
                 let result = fetch::fetch_all();
@@ -417,6 +421,7 @@ fn main() {
         }
     }
 
+    hide_diagram(&app);
     Crust::cleanup();
 }
 
@@ -557,6 +562,7 @@ fn pick_list(
         .collect();
     let w = 96.min(cols.saturating_sub(4));
     let h = (lines.len() as u16).min(rows.saturating_sub(6)).max(1);
+    hide_diagram(app);
     let mut pop = Popup::centered(w, h, 253, 236);
     // Open on the star we are already showing, so the list is a place to
     // walk from rather than a fresh start.
@@ -693,21 +699,22 @@ fn select(app: &mut App, new: usize, detail: &mut Pane, cols: u16) {
 
 /// True-ish colors for the spectral classes, from blue O to red M.
 fn class_rgb(c: char) -> (u8, u8, u8) {
-    match c {
-        // Saturated a little past the true colors: on a black terminal
-        // the real A/F whites are indistinguishable from each other.
-        'O' => (120, 150, 255),
-        'B' => (160, 195, 255),
-        'A' => (225, 235, 255),
-        'F' => (255, 245, 200),
-        'G' => (255, 215, 90),
-        'K' => (255, 150, 60),
-        'M' => (255, 90, 60),
-        'C' | 'S' | 'R' => (255, 90, 60), // carbon stars
-        'W' => (200, 210, 255),           // Wolf-Rayet
-        'L' | 'T' | 'Y' => (170, 80, 90), // brown dwarfs
-        _ => (150, 150, 150),
-    }
+    // The black-body colour of a typical star of the class; the odd ones
+    // by what they look like.
+    let teff = match c {
+        'O' => 35000.0,
+        'B' => 15000.0,
+        'A' => 8500.0,
+        'F' => 6500.0,
+        'G' => 5600.0,
+        'K' => 4400.0,
+        'M' => 3300.0,
+        'W' => 45000.0,             // Wolf-Rayet
+        'C' | 'S' | 'R' => 2800.0,  // carbon stars
+        'L' | 'T' | 'Y' => 1600.0,  // brown dwarfs
+        _ => return (150, 150, 150),
+    };
+    starmap::teff_rgb(teff)
 }
 
 const CLASS_LEGEND: [(&str, char); 7] = [
@@ -731,32 +738,10 @@ const SRC_LEGEND: [(&str, (u8, u8, u8)); 3] = [
     ("from magnitude", (170, 150, 200)),
 ];
 
-/// The color a star of this temperature shows, interpolated across the
-/// spectral classes so the temperature axis reads as a real spectrum.
+/// The colour a star of this temperature shows: a black body's, from
+/// starmap, the same as the sky draws.
 fn teff_rgb(teff: f64) -> (u8, u8, u8) {
-    const STOPS: [(f64, (u8, u8, u8)); 7] = [
-        (40000.0, (120, 150, 255)),
-        (20000.0, (160, 195, 255)),
-        (9700.0, (225, 235, 255)),
-        (7200.0, (255, 245, 200)),
-        (5800.0, (255, 215, 90)),
-        (4400.0, (255, 150, 60)),
-        (3000.0, (255, 90, 60)),
-    ];
-    let t = teff.clamp(3000.0, 40000.0);
-    for w in STOPS.windows(2) {
-        let (t0, c0) = w[0];
-        let (t1, c1) = w[1];
-        if t <= t0 && t >= t1 {
-            let f = (t0.ln() - t.ln()) / (t0.ln() - t1.ln());
-            return (
-                (c0.0 as f64 + (c1.0 as f64 - c0.0 as f64) * f) as u8,
-                (c0.1 as f64 + (c1.1 as f64 - c0.1 as f64) * f) as u8,
-                (c0.2 as f64 + (c1.2 as f64 - c0.2 as f64) * f) as u8,
-            );
-        }
-    }
-    STOPS[0].1
+    starmap::teff_rgb(teff)
 }
 
 fn gradient(t: f64) -> (u8, u8, u8) {
@@ -829,7 +814,8 @@ fn star_rgb(app: &App, s: &Star) -> (u8, u8, u8) {
             (Src::Spectral, _) | (Src::Color, _) => SRC_LEGEND[2].1,
             _ => (110, 110, 110),
         },
-        _ => class_rgb(s.class()),
+        // Its own temperature, as a black body shows it.
+        _ => starmap::teff_rgb(s.teff),
     }
 }
 
@@ -937,6 +923,54 @@ fn cell_of(x: f64, y: f64) -> Option<(u16, u16)> {
     Some((PLOT_Y + cy as u16, PLOT_X + cx as u16))
 }
 
+/// Take the diagram's picture down; redraw_diagram puts it back.
+fn hide_diagram(app: &App) {
+    if let Some(d) = app.pixels.borrow_mut().as_mut() {
+        d.clear_all();
+    }
+}
+
+/// The diagram as a picture the size of the plot box: the tracks as
+/// lines, the stars as discs sized by brightness in the mode's colour,
+/// the selected one ringed. See-through between them.
+fn diagram_canvas(app: &App, cell: (u16, u16)) -> glow::Canvas {
+    let mut c = glow::Canvas::with_cell(PLOT_W, PLOT_H, cell);
+    c.see_through();
+    let (w, h) = (c.w as f64, c.h as f64);
+    let dot = (cell.0.max(1) as f64 / 2.0 + cell.1.max(1) as f64 / 4.0) / 2.0;
+    let at = |x: f64, y: f64| (x * (w - 1.0) + 0.5, (1.0 - y) * (h - 1.0) + 0.5);
+    if app.track > 0 {
+        for (ti, tr) in tracks::TRACKS.iter().enumerate() {
+            if !(app.track == tracks::TRACKS.len() + 1 || app.track == ti + 1) {
+                continue;
+            }
+            let pts: Vec<(f64, f64)> = tr
+                .polyline()
+                .into_iter()
+                .map(|(lt, ll)| at((lt - LOG_T_HOT) / (LOG_T_COOL - LOG_T_HOT), (ll - LOG_L_MIN) / (LOG_L_MAX - LOG_L_MIN)))
+                .collect();
+            for pair in pts.windows(2) {
+                c.line(pair[0], pair[1], dot * 0.4, tr.color, 0.85);
+            }
+        }
+    }
+    // Faint first, so the bright ones paint over.
+    for st in app.stars.iter().rev() {
+        let (x, y) = plot_pos(st);
+        let p = at(x, y);
+        let r = (dot * (0.30 + 0.10 * (6.0 - st.mag).max(0.0))).min(dot * 1.5);
+        c.disc(p.0, p.1, r, star_rgb(app, st), 1.0);
+    }
+    let sel = &app.stars[app.sel];
+    let (x, y) = plot_pos(sel);
+    let p = at(x, y);
+    let r = (dot * (0.30 + 0.10 * (6.0 - sel.mag).max(0.0))).min(dot * 1.5);
+    c.ring(p.0, p.1, r + 2.5, (255, 255, 255), 1.0);
+    c.ring(p.0, p.1, r + 3.5, (255, 255, 255), 1.0);
+    c.settle_alpha();
+    c
+}
+
 fn redraw_diagram(app: &App, cols: u16) {
     if cols < PLOT_X + PLOT_W {
         print!("{}{}", move_to(PLOT_Y, 2), style::dim("terminal too narrow for the diagram"));
@@ -949,6 +983,17 @@ fn redraw_diagram(app: &App, cols: u16) {
     for r in 0..PLOT_H {
         s.push_str(&move_to(PLOT_Y + r, PLOT_X));
         s.push_str(&blank);
+    }
+    let pixels = app.pixels.borrow_mut().get_or_insert_with(glow::Display::new).supported();
+    if pixels {
+        print!("{s}");
+        std::io::stdout().flush().ok();
+        let canvas = diagram_canvas(app, glow::get_cell_size());
+        if let Some(d) = app.pixels.borrow_mut().as_mut() {
+            d.clear_all();
+            d.show_canvas(&canvas, PLOT_X, PLOT_Y);
+        }
+        return;
     }
 
     // Schematic evolutionary tracks go underneath the stars.
@@ -1069,6 +1114,7 @@ fn help_line() -> String {
 /// everything the axes need. Guests live for the session, so the shelf
 /// on disk stays the 461 stars with articles behind them.
 fn sky_pick(app: &mut App) -> Option<usize> {
+    hide_diagram(app);
     let start = starmap::View::new(starmap::Projection::Hemisphere { north: true });
     let picked = starmap::pick(start, starmap::Opts::default(), "stars")?;
     let p = picked.star;

@@ -10,23 +10,26 @@ Every named star with a measured parallax, plotted where it belongs on the HR di
 
 ![The HR diagram](img/screenshot-hr.png)
 
+In glass, or any terminal that shows images, the diagram and the sky are
+real pixels; elsewhere cells and braille.
+
 ## Features
 
 - **461 named stars** from the HYG catalog, plotted in log Teff against log luminosity
 - **Walk the diagram**: the arrow keys move cell by cell, so you can climb the main sequence and cross into the giants. `Tab` cycles the stars sharing a cell, `Enter` opens them as a pick list you walk with ↓↑ and choose from
 - **The whole catalog as a list** (`L`), ordered by whatever the color mode is asking: hottest, nearest, brightest, heaviest, largest. `e` writes the same ordering to `~/stars-by-<mode>.csv`, every column included
-- **Seven color modes** (keys 1-7, `m` for the menu, or Ctrl+←/→): spectral class in true star colors, luminosity class, distance, apparent magnitude, mass, radius, and data source
+- **Seven color modes** (keys 1-7, `m` for the menu, or Ctrl+←/→): each star's own black-body colour, luminosity class, distance, apparent magnitude, mass, radius, and data source
 - **Evolutionary tracks** (`t`): schematic paths for 1, 5 and 15 M☉, with their stages named below the diagram, from ZAMS through the giant branch to a white dwarf or a supernova
 - **Honest about its numbers**: measured values come from Wikidata, the rest are derived from the spectral type and absolute magnitude, and mode 7 colors the diagram by which is which
 - **The right Wikipedia article**: a star's IAU name is often a word first (Tupi is a people, Anser a genus of geese, Pollux a demigod), so each candidate page is checked before it is kept, falling through to `<name> (star)` and the HD / HIP designations. Cached locally for 445 of the 461
-- **Pick a star off the sky** (`M`): the celestial sphere in braille, 9,096 stars from the Bright Star Catalogue, `f` flips between the northern and southern half, `+`/`-` zoom, and `Enter` brings the star under the crosshair back to the diagram. One the catalog knows arrives with its article; anything else joins as a guest, placed from its Hipparcos distance and Bright Star colour. Drawn by [starmap](https://github.com/isene/starmap)
+- **Pick a star off the sky** (`M`): the celestial sphere, 9,096 stars from the Bright Star Catalogue, `f` flips between the northern and southern half, `+`/`-` zoom, and `Enter` brings the star under the crosshair back to the diagram. One the catalog knows arrives with its article; anything else joins as a guest, placed from its Hipparcos distance and Bright Star colour. Drawn by [starmap](https://github.com/isene/starmap)
 - **Ask Claude** (`c`) about the star you are looking at, with its data and article as context
 - **Zero idle cost**: event-driven, no timers, no polling
 - **Offline**: one fetch, then everything is local
 
 ### The sky
 
-Press `M` and the celestial sphere comes up in braille. Walk it with the
+Press `M` and the celestial sphere comes up. Walk it with the
 arrows, `f` flips between the northern and southern half, `+`/`-` zoom
 about the crosshair, and the star under it is named at the bottom with
 its magnitude, spectral type and distance. `Enter` takes it back to the
