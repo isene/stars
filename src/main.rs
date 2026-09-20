@@ -933,11 +933,11 @@ fn hide_diagram(app: &App) {
 /// The diagram as a picture the size of the plot box: the tracks as
 /// lines, the stars as discs sized by brightness in the mode's colour,
 /// the selected one ringed. See-through between them.
-fn diagram_canvas(app: &App, cell: (u16, u16)) -> glow::Canvas {
-    let mut c = glow::Canvas::with_cell(PLOT_W, PLOT_H, cell);
+fn diagram_canvas(app: &App, cell: Option<(u16, u16)>) -> glow::Canvas {
+    let mut c = glow::Canvas::sized(PLOT_W, PLOT_H, cell);
     c.see_through();
     let (w, h) = (c.w as f64, c.h as f64);
-    let dot = (cell.0.max(1) as f64 / 2.0 + cell.1.max(1) as f64 / 4.0) / 2.0;
+    let dot = (c.cell_w() / 2.0 + c.cell_h() / 4.0) / 2.0;
     let at = |x: f64, y: f64| (x * (w - 1.0) + 0.5, (1.0 - y) * (h - 1.0) + 0.5);
     if app.track > 0 {
         for (ti, tr) in tracks::TRACKS.iter().enumerate() {
@@ -967,7 +967,6 @@ fn diagram_canvas(app: &App, cell: (u16, u16)) -> glow::Canvas {
     let r = (dot * (0.30 + 0.10 * (6.0 - sel.mag).max(0.0))).min(dot * 1.5);
     c.ring(p.0, p.1, r + 2.5, (255, 255, 255), 1.0);
     c.ring(p.0, p.1, r + 3.5, (255, 255, 255), 1.0);
-    c.settle_alpha();
     c
 }
 
@@ -988,7 +987,7 @@ fn redraw_diagram(app: &App, cols: u16) {
     if pixels {
         print!("{s}");
         std::io::stdout().flush().ok();
-        let canvas = diagram_canvas(app, glow::get_cell_size());
+        let canvas = diagram_canvas(app, None);
         if let Some(d) = app.pixels.borrow_mut().as_mut() {
             d.clear_all();
             d.show_canvas(&canvas, PLOT_X, PLOT_Y);
@@ -1102,7 +1101,11 @@ fn draw_axes(cols: u16) {
 }
 
 fn help_line() -> String {
-    style::dim("←↓↑→ cell · Tab in-cell · ⏎ cell list · M sky · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q")
+    let keys = "←↓↑→ cell · Tab in-cell · ⏎ cell list · M sky · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q";
+    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let (cols, _) = Crust::terminal_size();
+    let pad = (cols as usize).saturating_sub(crust::display_width(keys) + version.len() + 1).max(1);
+    style::dim(&format!("{keys}{}{version}", " ".repeat(pad)))
 }
 
 /// Open the sky, let the user walk to a star, and land on it in the
