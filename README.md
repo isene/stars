@@ -73,6 +73,7 @@ First start builds the catalog (about three minutes), then the app works offline
 | g G | Top / bottom of the article |
 | / | Find a star by name |
 | c | Ask Claude about this star (follow-ups keep context) |
+| Ctrl-A | A full Claude session about what is on screen, as in every Fe₂O₃ app |
 | C | Toggle the Claude conversation view |
 | w | Open the star's Wikipedia page in the browser |
 | u | Rebuild the catalog |

@@ -349,6 +349,19 @@ fn main() {
                         .spawn();
                 }
             }
+            // Ctrl+A, as in every Fe2O3 app: a full Claude session about
+            // what is on screen, with the talk so far.
+            "C-A" => {
+                hide_diagram(&app);
+                let started = crust::claude_session("Stars", "I am in stars, my Hertzsprung-Russell diagram app.", &claude_context(&app));
+                Crust::clear_screen();
+                detail.full_refresh();
+                status.full_refresh();
+                draw_all(&app, &mut detail, &mut status, cols, rows);
+                if !started {
+                    status.say(&style::rgb(" claude is not on the PATH", Some(ERR_RGB), None, ""));
+                }
+            }
             "c" => {
                 let prompt = if app.chat.is_empty() {
                     format!("Ask Claude about {}: ", app.stars[app.sel].name)
@@ -1449,6 +1462,7 @@ fn help_text() -> String {
          \x20 g G                 top / bottom of the article\n\
          \x20 /                   find a star by name\n\
          \x20 c                   ask Claude about this star (follow-ups keep context)\n\
+         \x20 Ctrl-A              a full Claude session about what is on screen\n\
          \x20 C                   toggle the Claude conversation view\n\
          \x20 w                   open the star's Wikipedia page in the browser\n\
          \x20 e                   export that same ordered list to ~/stars-by-<mode>.csv\n\
@@ -1572,7 +1586,9 @@ fn claude_run(prompt: &str, input: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn ask_claude(app: &App, question: &str) -> Result<String, String> {
+/// What the screen shows, for Claude, with the talk so far: the `c`
+/// questions and the Ctrl+A session both start from it.
+fn claude_context(app: &App) -> String {
     let s = &app.stars[app.sel];
     let mut ctx = format!(
         "Star: {} ({}), spectral type {}, {:.0} K, {} L☉, {:.1} light years away.\n",
@@ -1600,6 +1616,12 @@ fn ask_claude(app: &App, question: &str) -> Result<String, String> {
             ctx.push_str(&format!("User: {q}\nYou: {a}\n\n"));
         }
     }
+    ctx
+}
+
+fn ask_claude(app: &App, question: &str) -> Result<String, String> {
+    let s = &app.stars[app.sel];
+    let mut ctx = claude_context(app);
     ctx.push_str(&format!("\n\nUser's question: {question}\n"));
     let prompt = format!(
         "You are an astrophysics tutor answering inside a terminal Hertzsprung-Russell \
