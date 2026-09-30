@@ -996,7 +996,7 @@ fn redraw_diagram(app: &App, cols: u16) {
         s.push_str(&move_to(PLOT_Y + r, PLOT_X));
         s.push_str(&blank);
     }
-    let pixels = app.pixels.borrow_mut().get_or_insert_with(glow::Display::new).supported();
+    let pixels = app.pixels.borrow_mut().get_or_insert_with(glow::Display::new).real_pixels();
     if pixels {
         print!("{s}");
         std::io::stdout().flush().ok();
