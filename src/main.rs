@@ -362,7 +362,7 @@ fn main() {
                     status.say(&style::rgb(" claude is not on the PATH", Some(ERR_RGB), None, ""));
                 }
             }
-            "c" => {
+            "c" if crust::CLAUDE => {
                 let prompt = if app.chat.is_empty() {
                     format!("Ask Claude about {}: ", app.stars[app.sel].name)
                 } else {
@@ -388,7 +388,7 @@ fn main() {
                     _ => status.say(&help_line()),
                 }
             }
-            "C" => {
+            "C" if crust::CLAUDE => {
                 app.view = if app.view == View::Chat { View::Article } else { View::Chat };
                 set_detail(&app, &mut detail, cols);
             }
@@ -1113,10 +1113,10 @@ fn draw_axes(cols: u16) {
 }
 
 fn help_line() -> String {
-    let keys = "←↓↑→ cell · Tab in-cell · ⏎ cell list · M sky · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q";
+    let keys = crust::key_help("←↓↑→ cell · Tab in-cell · ⏎ cell list · M sky · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q");
     let version = format!("v{}", env!("CARGO_PKG_VERSION"));
     let (cols, _) = Crust::terminal_size();
-    let pad = (cols as usize).saturating_sub(crust::display_width(keys) + version.len() + 1).max(1);
+    let pad = (cols as usize).saturating_sub(crust::display_width(&keys) + version.len() + 1).max(1);
     style::dim(&format!("{keys}{}{version}", " ".repeat(pad)))
 }
 
@@ -1200,7 +1200,7 @@ fn draw_all(app: &App, detail: &mut Pane, status: &mut Pane, cols: u16, _rows: u
 fn set_detail(app: &App, detail: &mut Pane, cols: u16) {
     let side = cols >= SIDE_MIN;
     let text = match app.view {
-        View::Help => help_text(),
+        View::Help => crust::key_help(help_text()).into_owned(),
         View::Chat => chat_text(app),
         View::Modes => modes_text(app),
         // With a track laid over the diagram, name its stages above the
