@@ -1114,10 +1114,10 @@ fn draw_axes(cols: u16) {
 
 fn help_line() -> String {
     let keys = crust::key_help("←↓↑→ cell · Tab in-cell · ⏎ cell list · M sky · L all · e csv · 1-7/m color · t tracks · / find · c claude · ? help · q");
-    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let version = crust::version_tag("stars", env!("CARGO_PKG_VERSION"));
     let (cols, _) = Crust::terminal_size();
-    let pad = (cols as usize).saturating_sub(crust::display_width(&keys) + version.len() + 1).max(1);
-    style::dim(&format!("{keys}{}{version}", " ".repeat(pad)))
+    let pad = (cols as usize).saturating_sub(crust::display_width(&keys) + crust::display_width(&version)).max(1);
+    format!("{}{version}", style::dim(&format!("{keys}{}", " ".repeat(pad))))
 }
 
 /// Open the sky, let the user walk to a star, and land on it in the
